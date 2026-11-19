@@ -135,6 +135,137 @@ public class OfferSelectorTests
         Assert.NotNull(offer);
         Assert.Equal(10, offer.Moq); // Lower MOQ wins tie
     }
+
+    [Fact]
+    public void SelectBest_MpnMismatch_ReturnsNotFoundWithClosest()
+    {
+        var product = new DigiKeyProduct
+        {
+            Manufacturer = new DigiKeyManufacturer { Name = "TestMfg" },
+            ManufacturerProductNumber = "DIFFERENT-MPN", // Different from requested
+            ProductVariations =
+            [
+                new DigiKeyVariation
+                {
+                    MarketPlace = false,
+                    MinimumOrderQuantity = 10,
+                    StandardPackage = 100,
+                    Packaging = new DigiKeyPackaging { Name = "Cut Tape" },
+                    QuantityAvailableforPackageType = 1000,
+                    UnitPrice = 0.50m,
+                    StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 10, UnitPrice = 0.50m }]
+                }
+            ],
+            Classifications = new DigiKeyClassifications { RohsStatus = "ROHS3 Compliant", ReachStatus = "REACH Unaffected" }
+        };
+
+        var (offer, remarks) = OfferSelector.SelectBest(product, 10, "REQUESTED-MPN");
+
+        Assert.Null(offer);
+        Assert.Contains("Not found (closest: DIFFERENT-MPN)", remarks);
+    }
+
+    [Fact]
+    public void SelectBest_RohsNonCompliant_ReturnsNo()
+    {
+        var product = new DigiKeyProduct
+        {
+            Manufacturer = new DigiKeyManufacturer { Name = "TestMfg" },
+            ManufacturerProductNumber = "TEST-123",
+            ProductVariations =
+            [
+                new DigiKeyVariation
+                {
+                    MarketPlace = false,
+                    MinimumOrderQuantity = 10,
+                    StandardPackage = 100,
+                    Packaging = new DigiKeyPackaging { Name = "Cut Tape" },
+                    QuantityAvailableforPackageType = 1000,
+                    UnitPrice = 0.50m,
+                    StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 10, UnitPrice = 0.50m }]
+                }
+            ],
+            Classifications = new DigiKeyClassifications { RohsStatus = "RoHS non-compliant", ReachStatus = "REACH Unaffected" }
+        };
+
+        var (offer, remarks) = OfferSelector.SelectBest(product, 10, "TEST-123");
+
+        Assert.NotNull(offer);
+        Assert.Equal("No", offer.RoHS_REACH); // non-compliant -> No
+        Assert.Contains("COO missing", remarks);
+    }
+
+    [Fact]
+    public void SelectBest_ReachNonCompliant_ReturnsNo()
+    {
+        var product = new DigiKeyProduct
+        {
+            Manufacturer = new DigiKeyManufacturer { Name = "TestMfg" },
+            ManufacturerProductNumber = "TEST-123",
+            ProductVariations =
+            [
+                new DigiKeyVariation
+                {
+                    MarketPlace = false,
+                    MinimumOrderQuantity = 10,
+                    StandardPackage = 100,
+                    Packaging = new DigiKeyPackaging { Name = "Cut Tape" },
+                    QuantityAvailableforPackageType = 1000,
+                    UnitPrice = 0.50m,
+                    StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 10, UnitPrice = 0.50m }]
+                }
+            ],
+            Classifications = new DigiKeyClassifications { RohsStatus = "ROHS3 Compliant", ReachStatus = "REACH non-compliant" }
+        };
+
+        var (offer, remarks) = OfferSelector.SelectBest(product, 10, "TEST-123");
+
+        Assert.NotNull(offer);
+        Assert.Equal("No", offer.RoHS_REACH); // REACH non-compliant -> No
+    }
+
+    [Fact]
+    public void SelectBest_StockCheckUsesMaxQtyMoq()
+    {
+        var product = new DigiKeyProduct
+        {
+            Manufacturer = new DigiKeyManufacturer { Name = "TestMfg" },
+            ManufacturerProductNumber = "TEST-123",
+            ProductVariations =
+            [
+                new DigiKeyVariation
+                {
+                    MarketPlace = false,
+                    MinimumOrderQuantity = 100, // MOQ = 100
+                    StandardPackage = 1000,
+                    Packaging = new DigiKeyPackaging { Name = "Cut Tape" },
+                    QuantityAvailableforPackageType = 50, // Stock = 50, less than max(qty=10, MOQ=100)=100
+                    UnitPrice = 0.50m,
+                    StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 100, UnitPrice = 0.50m }]
+                },
+                new DigiKeyVariation
+                {
+                    MarketPlace = false,
+                    MinimumOrderQuantity = 10,
+                    StandardPackage = 100,
+                    Packaging = new DigiKeyPackaging { Name = "Cut Tape" },
+                    QuantityAvailableforPackageType = 1000, // Stock = 1000 >= max(10, 10) = 10
+                    UnitPrice = 0.60m,
+                    StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 10, UnitPrice = 0.60m }]
+                }
+            ],
+            Classifications = new DigiKeyClassifications { RohsStatus = "ROHS3 Compliant", ReachStatus = "REACH Unaffected" }
+        };
+
+        // Qty = 10, but first variation has MOQ=100, so effective qty = 100
+        // First variation has stock 50 < 100 -> low stock, should fall through to second variation
+        var (offer, remarks) = OfferSelector.SelectBest(product, 10, "TEST-123");
+
+        Assert.NotNull(offer);
+        Assert.Equal(10, offer.Moq); // Second variation chosen (has stock)
+        Assert.Equal(0.60m, offer.UnitPrice);
+        Assert.DoesNotContain("Low stock", remarks); // Second variation has sufficient stock
+    }
 }
 
 public class MpnCleanerTests

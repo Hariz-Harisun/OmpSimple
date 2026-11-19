@@ -20,9 +20,10 @@ class Program
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         using var client = new DigiKeyClient(http);
 
-        var mpnCache = new Dictionary<string, DigiKeySearchResponse?>();
+        var mpnCache = new Dictionary<string, (DigiKeySearchResponse? Response, int StatusCode)>();
         bool rateLimited = false;
         bool authFailed = false;
+        bool anyRateLimitOrAuthFailure = false;
 
         foreach (var file in inputFiles)
         {
@@ -48,11 +49,13 @@ class Program
                 {
                     remarks = "Skipped: rate limit";
                     skipped++;
+                    anyRateLimitOrAuthFailure = true;
                 }
                 else if (authFailed)
                 {
                     remarks = "Skipped: auth failed";
                     skipped++;
+                    anyRateLimitOrAuthFailure = true;
                 }
                 else
                 {
@@ -60,14 +63,15 @@ class Program
                     int statusCode = 0;
                     if (mpnCache.TryGetValue(cleanedMpn, out var cached))
                     {
-                        searchResp = cached;
+                        searchResp = cached.Response;
+                        statusCode = cached.StatusCode;
                     }
                     else
                     {
                         var (resp, sc) = await client.SearchAsync(cleanedMpn);
                         searchResp = resp;
                         statusCode = sc;
-                        mpnCache[cleanedMpn] = searchResp;
+                        mpnCache[cleanedMpn] = (searchResp, statusCode);
                         digikeyCalls++;
 
                         if (statusCode == 429)
@@ -75,12 +79,14 @@ class Program
                             rateLimited = true;
                             remarks = "Skipped: rate limit";
                             skipped++;
+                            anyRateLimitOrAuthFailure = true;
                         }
                         else if (statusCode == 401 || statusCode == 403)
                         {
                             authFailed = true;
                             remarks = "Skipped: auth failed";
                             skipped++;
+                            anyRateLimitOrAuthFailure = true;
                         }
 
                         await Task.Delay(600);
@@ -102,7 +108,7 @@ class Program
                             }
                             else
                             {
-                                remarks = "No valid offer";
+                                remarks = offerRemarks; // Contains "Not found (closest: ...)" or "No valid offer"
                                 notFound++;
                             }
                         }
@@ -135,11 +141,18 @@ class Program
             ExcelProcessor.WriteOutput(file, xlsxPath, outputRows);
             Console.WriteLine($"  Excel saved: {xlsxPath}");
 
-            // Verify both exist then delete input
+            // Verify both exist then delete input (only if no rate limit/auth failure)
             if (File.Exists(jsonPath) && File.Exists(xlsxPath))
             {
-                File.Delete(file);
-                Console.WriteLine($"  Input deleted: {file}");
+                if (anyRateLimitOrAuthFailure)
+                {
+                    Console.WriteLine($"  Input NOT deleted (rate limit or auth failure occurred)");
+                }
+                else
+                {
+                    File.Delete(file);
+                    Console.WriteLine($"  Input deleted: {file}");
+                }
             }
             else
             {

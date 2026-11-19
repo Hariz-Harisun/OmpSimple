@@ -12,6 +12,13 @@ public static class OfferSelector
         if (product.ProductVariations.Count == 0)
             return (null, "No variations");
 
+        // MPN match check
+        var returnedMpn = product.ManufacturerProductNumber ?? "";
+        if (!MpnMatch(cleanedMpn: originalMpn, returnedMpn))
+        {
+            return (null, $"Not found (closest: {returnedMpn})");
+        }
+
         var validVariations = product.ProductVariations.Where(v => !v.MarketPlace).ToList();
         if (validVariations.Count == 0)
         {
@@ -19,11 +26,19 @@ public static class OfferSelector
             remarks.Add("Marketplace only");
         }
 
-        var effectiveQty = Math.Max(qty, 1);
-        var withStock = validVariations.Where(v => v.QuantityAvailableforPackageType >= effectiveQty).ToList();
-        if (withStock.Count == 0)
+        // Filter variations that have sufficient stock for effective qty (max of requested qty and MOQ)
+        var variationsWithStock = new List<DigiKeyVariation>();
+        foreach (var v in validVariations)
         {
-            withStock = validVariations;
+            var eq = Math.Max(qty, v.MinimumOrderQuantity);
+            if (v.QuantityAvailableforPackageType >= eq)
+                variationsWithStock.Add(v);
+        }
+
+        bool lowStockFallback = false;
+        if (variationsWithStock.Count == 0)
+        {
+            variationsWithStock = validVariations;
             remarks.Add("Low stock");
         }
 
@@ -31,10 +46,10 @@ public static class OfferSelector
         decimal bestPrice = decimal.MaxValue;
         int bestMoq = int.MaxValue;
 
-        foreach (var v in withStock)
+        foreach (var v in variationsWithStock)
         {
             var moq = v.MinimumOrderQuantity;
-            var eq = Math.Max(effectiveQty, moq);
+            var eq = Math.Max(qty, moq);
             var price = GetPriceForQty(v, eq);
             if (price <= 0) continue;
 
@@ -52,12 +67,13 @@ public static class OfferSelector
         if (bestMoq > qty)
             remarks.Add($"MOQ {bestMoq} above Qty {qty}");
 
+        // RoHS/REACH: Yes only if RohsStatus contains "compliant" and NOT "non"/"not", and ReachStatus contains "unaffected" or "compliant" and NOT "non"/"not"
         if (product.Classifications != null)
         {
             var rohs = product.Classifications.RohsStatus?.ToLowerInvariant() ?? "";
             var reach = product.Classifications.ReachStatus?.ToLowerInvariant() ?? "";
-            bool rohsOk = rohs.Contains("compliant") || rohs.Contains("rohs3");
-            bool reachOk = reach.Contains("unaffected") || reach.Contains("compliant");
+            bool rohsOk = rohs.Contains("compliant") && !rohs.Contains("non") && !rohs.Contains("not");
+            bool reachOk = (reach.Contains("unaffected") || reach.Contains("compliant")) && !reach.Contains("non") && !reach.Contains("not");
             best.RoHS_REACH = (rohsOk && reachOk) ? "Yes" : "No";
         }
         else
@@ -65,10 +81,8 @@ public static class OfferSelector
             best.RoHS_REACH = "No";
         }
 
-        if (!string.IsNullOrWhiteSpace(product.CountryOfOrigin))
-            best.Coo = product.CountryOfOrigin;
-        else
-            remarks.Add("COO missing");
+        // COO: always blank with "COO missing" in remarks
+        remarks.Add("COO missing");
 
         var altMatch = Regex.Match(originalMpn, @"[/\r\n]");
         if (altMatch.Success)
@@ -85,6 +99,15 @@ public static class OfferSelector
             remarks.Add("Terms: default");
 
         return (best, string.Join("; ", remarks));
+    }
+
+    private static bool MpnMatch(string cleanedMpn, string returnedMpn)
+    {
+        if (string.IsNullOrWhiteSpace(cleanedMpn) || string.IsNullOrWhiteSpace(returnedMpn))
+            return false;
+        var norm1 = Regex.Replace(cleanedMpn, @"[\s\-,\.]", "").ToUpperInvariant();
+        var norm2 = Regex.Replace(returnedMpn, @"[\s\-,\.]", "").ToUpperInvariant();
+        return norm1 == norm2;
     }
 
     private static decimal GetPriceForQty(DigiKeyVariation v, int qty)

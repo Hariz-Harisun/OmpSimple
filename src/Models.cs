@@ -75,9 +75,6 @@ public sealed class DigiKeyProduct
 
     [JsonPropertyName("Classifications")]
     public DigiKeyClassifications? Classifications { get; set; }
-
-    [JsonPropertyName("CountryOfOrigin")]
-    public string? CountryOfOrigin { get; set; }
 }
 
 public sealed class DigiKeyManufacturer
