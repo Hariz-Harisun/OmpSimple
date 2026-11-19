@@ -97,7 +97,7 @@ class Program
                         if (searchResp?.Products.Count > 0)
                         {
                             int qty = int.TryParse(row.Qty, out var q) ? q : 0;
-                            var (offer, offerRemarks) = OfferSelector.SelectBest(searchResp.Products[0], qty, row.Mpn);
+                            var (offer, offerRemarks) = OfferSelector.SelectBest(searchResp.Products[0], qty, cleanedMpn);
                             if (offer != null)
                             {
                                 outputRow.ChosenOffer = offer;

@@ -84,14 +84,6 @@ public static class OfferSelector
         // COO: always blank with "COO missing" in remarks
         remarks.Add("COO missing");
 
-        var altMatch = Regex.Match(originalMpn, @"[/\r\n]");
-        if (altMatch.Success)
-        {
-            var parts = Regex.Split(originalMpn, @"[/\r\n]+").Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
-            if (parts.Count > 1)
-                remarks.Add($"Alternates: {string.Join(", ", parts.Skip(1))}");
-        }
-
         if (best.TariffActive) remarks.Add("Tariff active");
         if (best.Ncnr) remarks.Add("NCNR");
         if (best.Discontinued || best.EndOfLife) remarks.Add("Discontinued");

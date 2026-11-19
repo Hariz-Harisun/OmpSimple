@@ -225,6 +225,39 @@ public class OfferSelectorTests
     }
 
     [Fact]
+    public void SelectBest_CleanedMpnMatchesWithAlternatesInRemarks()
+    {
+        var product = new DigiKeyProduct
+        {
+            Manufacturer = new DigiKeyManufacturer { Name = "TestMfg" },
+            ManufacturerProductNumber = "BAT54CW,115",
+            ProductVariations =
+            [
+                new DigiKeyVariation
+                {
+                    MarketPlace = false,
+                    MinimumOrderQuantity = 10,
+                    StandardPackage = 100,
+                    Packaging = new DigiKeyPackaging { Name = "Cut Tape" },
+                    QuantityAvailableforPackageType = 1000,
+                    UnitPrice = 0.50m,
+                    StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 10, UnitPrice = 0.50m }]
+                }
+            ],
+            Classifications = new DigiKeyClassifications { RohsStatus = "ROHS3 Compliant", ReachStatus = "REACH Unaffected" }
+        };
+
+        // Pass the CLEANED MPN (first MPN only) for matching
+        var (offer, remarks) = OfferSelector.SelectBest(product, 10, "BAT54CW,115");
+
+        Assert.NotNull(offer);
+        Assert.Equal("BAT54CW,115", offer.Mpn);
+        // Alternates are added by Program.cs, not OfferSelector - but verify no spurious alternates in remarks from SelectBest
+        Assert.DoesNotContain("Alternates:", remarks);
+        Assert.Contains("COO missing", remarks);
+    }
+
+    [Fact]
     public void SelectBest_StockCheckUsesMaxQtyMoq()
     {
         var product = new DigiKeyProduct
@@ -306,6 +339,14 @@ public class MpnCleanerTests
     {
         var (cleaned, alternates) = MpnCleaner.Clean("  ABC123  ");
         Assert.Equal("ABC123", cleaned);
+    }
+
+    [Fact]
+    public void Clean_Bat54cwWithAlternates_ReturnsFirstAndAlternates()
+    {
+        var (cleaned, alternates) = MpnCleaner.Clean("BAT54CW,115 / BAT54CWT1G (at)");
+        Assert.Equal("BAT54CW,115", cleaned);
+        Assert.Equal("BAT54CWT1G (at)", alternates);
     }
 
     [Fact]
