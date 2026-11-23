@@ -44,11 +44,11 @@ public sealed class DigiKeyClient : IDisposable
         return _accessToken;
     }
 
-    public async Task<(DigiKeySearchResponse? Response, int StatusCode)> SearchAsync(string mpn, CancellationToken ct = default)
+    public async Task<(DigiKeySearchResponse? Response, int StatusCode, string? RateLimitLimit, string? RateLimitRemaining)> SearchAsync(string mpn, CancellationToken ct = default)
     {
         var token = await GetTokenAsync(ct);
         if (string.IsNullOrEmpty(token))
-            return (null, 401);
+            return (null, 401, null, null);
 
         var request = new HttpRequestMessage(HttpMethod.Post, "products/v4/search/keyword")
         {
@@ -64,11 +64,14 @@ public sealed class DigiKeyClient : IDisposable
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
         var resp = await _http.SendAsync(request, ct);
+        var rateLimitLimit = resp.Headers.TryGetValues("X-RateLimit-Limit", out var vals) ? vals.FirstOrDefault() : null;
+        var rateLimitRemaining = resp.Headers.TryGetValues("X-RateLimit-Remaining", out var vals2) ? vals2.FirstOrDefault() : null;
+
         if (!resp.IsSuccessStatusCode)
-            return (null, (int)resp.StatusCode);
+            return (null, (int)resp.StatusCode, rateLimitLimit, rateLimitRemaining);
 
         var json = await resp.Content.ReadAsStringAsync(ct);
-        return (JsonSerializer.Deserialize<DigiKeySearchResponse>(json, _jsonOptions), 200);
+        return (JsonSerializer.Deserialize<DigiKeySearchResponse>(json, _jsonOptions), 200, rateLimitLimit, rateLimitRemaining);
     }
 
     public void Dispose() => _http.Dispose();

@@ -20,10 +20,12 @@ class Program
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         using var client = new DigiKeyClient(http);
 
-        var mpnCache = new Dictionary<string, (DigiKeySearchResponse? Response, int StatusCode)>();
+        var mpnCache = new Dictionary<string, (DigiKeySearchResponse? Response, int StatusCode, string? RateLimitLimit, string? RateLimitRemaining)>();
         bool rateLimited = false;
         bool authFailed = false;
         bool anyRateLimitOrAuthFailure = false;
+        string? lastRateLimitLimit = null;
+        string? lastRateLimitRemaining = null;
 
         foreach (var file in inputFiles)
         {
@@ -61,18 +63,27 @@ class Program
                 {
                     DigiKeySearchResponse? searchResp;
                     int statusCode = 0;
+                    string? rateLimitLimit = null;
+                    string? rateLimitRemaining = null;
                     if (mpnCache.TryGetValue(cleanedMpn, out var cached))
                     {
                         searchResp = cached.Response;
                         statusCode = cached.StatusCode;
+                        rateLimitLimit = cached.RateLimitLimit;
+                        rateLimitRemaining = cached.RateLimitRemaining;
                     }
                     else
                     {
-                        var (resp, sc) = await client.SearchAsync(cleanedMpn);
+                        var (resp, sc, rll, rlr) = await client.SearchAsync(cleanedMpn);
                         searchResp = resp;
                         statusCode = sc;
-                        mpnCache[cleanedMpn] = (searchResp, statusCode);
+                        rateLimitLimit = rll;
+                        rateLimitRemaining = rlr;
+                        mpnCache[cleanedMpn] = (searchResp, statusCode, rateLimitLimit, rateLimitRemaining);
                         digikeyCalls++;
+
+                        lastRateLimitLimit = rateLimitLimit;
+                        lastRateLimitRemaining = rateLimitRemaining;
 
                         if (statusCode == 429)
                         {
@@ -160,6 +171,11 @@ class Program
             }
 
             Console.WriteLine($"  Summary: found={found}, notFound={notFound}, skipped={skipped}, digikeyCalls={digikeyCalls}");
+            if (!string.IsNullOrEmpty(lastRateLimitLimit) || !string.IsNullOrEmpty(lastRateLimitRemaining))
+            {
+                Console.WriteLine($"  X-RateLimit-Limit: {lastRateLimitLimit ?? "N/A"}");
+                Console.WriteLine($"  X-RateLimit-Remaining: {lastRateLimitRemaining ?? "N/A"}");
+            }
         }
 
         Console.WriteLine("Done.");
