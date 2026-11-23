@@ -52,7 +52,7 @@ public sealed class DigiKeyClient : IDisposable
 
         var request = new HttpRequestMessage(HttpMethod.Post, "products/v4/search/keyword")
         {
-            Content = JsonContent.Create(new { Keywords = mpn, Limit = 1, Offset = 0 })
+            Content = JsonContent.Create(new { Keywords = mpn, Limit = 10, Offset = 0 })
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Add("X-DIGIKEY-Client-Id", Credentials.ClientId);

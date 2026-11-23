@@ -166,6 +166,83 @@ public class OfferSelectorTests
     }
 
     [Fact]
+    public void SelectBest_DifferentManufacturerStillAcceptsProduct()
+    {
+        var product = new DigiKeyProduct
+        {
+            Manufacturer = new DigiKeyManufacturer { Name = "onsemi" },
+            ManufacturerProductNumber = "BAT54CWT1G",
+            ProductVariations =
+            [
+                new DigiKeyVariation
+                {
+                    MarketPlace = false,
+                    MinimumOrderQuantity = 1,
+                    QuantityAvailableforPackageType = 1000,
+                    UnitPrice = 0.10m,
+                    StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 1, UnitPrice = 0.10m }]
+                }
+            ]
+        };
+
+        var (offer, remarks) = OfferSelector.SelectBest(product, 1, "BAT54CWT1G", "On Semi Alternate");
+
+        Assert.NotNull(offer);
+        Assert.DoesNotContain("Manufacturer mismatch", remarks);
+    }
+
+    [Fact]
+    public void SelectBest_ChoosesManufacturerAlignedProductFromResults()
+    {
+        var products = new List<DigiKeyProduct>
+        {
+            new()
+            {
+                Manufacturer = new DigiKeyManufacturer { Name = "Other Manufacturer" },
+                ManufacturerProductNumber = "CC3100MOD",
+                ProductVariations = [CreateVariation()]
+            },
+            new()
+            {
+                Manufacturer = new DigiKeyManufacturer { Name = "Texas Instruments" },
+                ManufacturerProductNumber = "CC3100MODR11MAMOBR",
+                ProductVariations = [CreateVariation()]
+            }
+        };
+
+        var (offer, _) = OfferSelector.SelectBest(products, 1, "CC3100MOD", "TI");
+
+        Assert.NotNull(offer);
+        Assert.Equal("CC3100MODR11MAMOBR", offer.Mpn);
+    }
+
+    [Fact]
+    public void SelectBest_ManufacturerAliasIsAcceptedWithoutDifferenceRemark()
+    {
+        var product = new DigiKeyProduct
+        {
+            Manufacturer = new DigiKeyManufacturer { Name = "Texas Instruments" },
+            ManufacturerProductNumber = "CC3100MODR11MAMOBR",
+            ProductVariations =
+            [
+                new DigiKeyVariation
+                {
+                    MarketPlace = false,
+                    MinimumOrderQuantity = 1,
+                    QuantityAvailableforPackageType = 1000,
+                    UnitPrice = 1.00m,
+                    StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 1, UnitPrice = 1.00m }]
+                }
+            ]
+        };
+
+        var (offer, remarks) = OfferSelector.SelectBest(product, 1, "CC3100MOD", "TI");
+
+        Assert.NotNull(offer);
+        Assert.DoesNotContain("Mfg differs", remarks);
+    }
+
+    [Fact]
     public void SelectBest_RohsNonCompliant_ReturnsNo()
     {
         var product = new DigiKeyProduct
@@ -299,6 +376,14 @@ public class OfferSelectorTests
         Assert.Equal(0.60m, offer.UnitPrice);
         Assert.DoesNotContain("Low stock", remarks); // Second variation has sufficient stock
     }
+    private static DigiKeyVariation CreateVariation() => new()
+    {
+        MarketPlace = false,
+        MinimumOrderQuantity = 1,
+        QuantityAvailableforPackageType = 1000,
+        UnitPrice = 1.00m,
+        StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 1, UnitPrice = 1.00m }]
+    };
 }
 
 public class MpnCleanerTests
@@ -347,6 +432,15 @@ public class MpnCleanerTests
         var (cleaned, alternates) = MpnCleaner.Clean("BAT54CW,115 / BAT54CWT1G (at)");
         Assert.Equal("BAT54CW,115", cleaned);
         Assert.Equal("BAT54CWT1G (at)", alternates);
+    }
+
+    [Fact]
+    public void Clean_RemovesTrailingXMarkerFromEachMpn()
+    {
+        var (cleaned, alternates) = MpnCleaner.Clean("BLM18PG331SN1x\nXFL4020-222MEx\nLQH32CN100K53x");
+
+        Assert.Equal("BLM18PG331SN1", cleaned);
+        Assert.Equal("XFL4020-222ME, LQH32CN100K53", alternates);
     }
 
     [Fact]
