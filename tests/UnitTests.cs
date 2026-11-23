@@ -58,6 +58,64 @@ public class OfferSelectorTests
     }
 
     [Fact]
+    public void SelectBest_UsesPackageTypeFromPricedVariation()
+    {
+        const string json = """
+        {
+            "Manufacturer": { "Name": "TestMfg" },
+            "ManufacturerProductNumber": "TEST-123",
+            "ProductVariations": [
+                {
+                    "PackageType": { "Name": "Cut Tape (CT)" },
+                    "QuantityAvailableforPackageType": 1000,
+                    "MinimumOrderQuantity": 1,
+                    "StandardPricing": [{ "BreakQuantity": 1, "UnitPrice": 0.25 }]
+                },
+                {
+                    "PackageType": { "Name": "Tape & Reel (TR)" },
+                    "QuantityAvailableforPackageType": 1000,
+                    "MinimumOrderQuantity": 1,
+                    "StandardPricing": [{ "BreakQuantity": 1, "UnitPrice": 0.20 }]
+                }
+            ]
+        }
+        """;
+
+        var product = System.Text.Json.JsonSerializer.Deserialize<DigiKeyProduct>(json)!;
+        var (offer, _) = OfferSelector.SelectBest(product, 1, "TEST-123");
+
+        Assert.NotNull(offer);
+        Assert.Equal(0.20m, offer.UnitPrice);
+        Assert.Equal("T&R", offer.Packaging);
+    }
+
+    [Fact]
+    public void SelectBest_UsesProductLevelManufacturerLeadWeeks()
+    {
+        const string json = """
+        {
+            "Manufacturer": { "Name": "TestMfg" },
+            "ManufacturerProductNumber": "TEST-123",
+            "ManufacturerLeadWeeks": "21",
+            "ProductVariations": [
+                {
+                    "PackageType": { "Name": "Cut Tape (CT)" },
+                    "QuantityAvailableforPackageType": 1000,
+                    "MinimumOrderQuantity": 1,
+                    "StandardPricing": [{ "BreakQuantity": 1, "UnitPrice": 0.25 }]
+                }
+            ]
+        }
+        """;
+
+        var product = System.Text.Json.JsonSerializer.Deserialize<DigiKeyProduct>(json)!;
+        var (offer, _) = OfferSelector.SelectBest(product, 1, "TEST-123");
+
+        Assert.NotNull(offer);
+        Assert.Equal(21, offer.LeadTimeWeeks);
+    }
+
+    [Fact]
     public void SelectBest_IgnoresMarketplace()
     {
         var product = new DigiKeyProduct
@@ -269,6 +327,7 @@ public class OfferSelectorTests
 
         Assert.NotNull(offer);
         Assert.Equal("No", offer.RoHS_REACH); // non-compliant -> No
+        Assert.Equal("Not stated.", offer.Coo);
         Assert.Contains("COO missing", remarks);
     }
 
@@ -335,6 +394,55 @@ public class OfferSelectorTests
     }
 
     [Fact]
+    public void SelectBest_NcnrUsesManufacturerLeadWeeksForBothWindows()
+    {
+        var product = new DigiKeyProduct
+        {
+            ManufacturerProductNumber = "TEST-123",
+            ManufacturerLeadWeeks = "21",
+            ProductVariations = [CreateVariation(ncnr: true)]
+        };
+
+        var (offer, _) = OfferSelector.SelectBest(product, 10, "TEST-123");
+
+        Assert.NotNull(offer);
+        Assert.Equal(21, offer.CancellationWeeks);
+        Assert.Equal(21, offer.RescheduleWeeks);
+    }
+
+    [Fact]
+    public void SelectBest_InStockNonNcnrUsesZeroWindows()
+    {
+        var product = new DigiKeyProduct
+        {
+            ManufacturerProductNumber = "TEST-123",
+            ProductVariations = [CreateVariation()]
+        };
+
+        var (offer, _) = OfferSelector.SelectBest(product, 10, "TEST-123");
+
+        Assert.NotNull(offer);
+        Assert.Equal(0, offer.CancellationWeeks);
+        Assert.Equal(0, offer.RescheduleWeeks);
+    }
+
+    [Fact]
+    public void SelectBest_OutOfStockNonNcnrUsesScheduledOrderBaseline()
+    {
+        var product = new DigiKeyProduct
+        {
+            ManufacturerProductNumber = "TEST-123",
+            ProductVariations = [CreateVariation(quantityAvailable: 0)]
+        };
+
+        var (offer, _) = OfferSelector.SelectBest(product, 10, "TEST-123");
+
+        Assert.NotNull(offer);
+        Assert.Equal(4, offer.CancellationWeeks);
+        Assert.Equal(8, offer.RescheduleWeeks);
+    }
+
+    [Fact]
     public void SelectBest_StockCheckUsesMaxQtyMoq()
     {
         var product = new DigiKeyProduct
@@ -376,12 +484,13 @@ public class OfferSelectorTests
         Assert.Equal(0.60m, offer.UnitPrice);
         Assert.DoesNotContain("Low stock", remarks); // Second variation has sufficient stock
     }
-    private static DigiKeyVariation CreateVariation() => new()
+    private static DigiKeyVariation CreateVariation(bool ncnr = false, int quantityAvailable = 1000) => new()
     {
         MarketPlace = false,
         MinimumOrderQuantity = 1,
-        QuantityAvailableforPackageType = 1000,
+        QuantityAvailableforPackageType = quantityAvailable,
         UnitPrice = 1.00m,
+        Ncnr = ncnr,
         StandardPricing = [new DigiKeyStandardPricing { BreakQuantity = 1, UnitPrice = 1.00m }]
     };
 }
@@ -441,6 +550,24 @@ public class MpnCleanerTests
 
         Assert.Equal("BLM18PG331SN1", cleaned);
         Assert.Equal("XFL4020-222ME, LQH32CN100K53", alternates);
+    }
+
+    [Fact]
+    public void Clean_RemovesTrailingDoubleXMarker()
+    {
+        var (cleaned, alternates) = MpnCleaner.Clean("04381.25xx\nSTM32H743BIT6xx");
+
+        Assert.Equal("04381.25", cleaned);
+        Assert.Equal("STM32H743BIT6", alternates);
+    }
+
+    [Fact]
+    public void Clean_PreservesUppercaseXProductSuffix()
+    {
+        var (cleaned, alternates) = MpnCleaner.Clean("ABCXX");
+
+        Assert.Equal("ABCXX", cleaned);
+        Assert.Empty(alternates);
     }
 
     [Fact]

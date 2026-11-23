@@ -109,7 +109,8 @@ public static class OfferSelector
             best.RoHS_REACH = "No";
         }
 
-        // COO: always blank with "COO missing" in remarks
+        // DigiKey search does not state COO.
+        best.Coo = "Not stated.";
         remarks.Add("COO missing");
 
         if (best.TariffActive) remarks.Add("Tariff active");
@@ -268,12 +269,12 @@ public static class OfferSelector
 
     private static Offer BuildOffer(DigiKeyProduct product, DigiKeyVariation v, decimal price, int moq, int effectiveQty)
     {
-        var packagingName = v.Packaging?.Name ?? "";
+        var packagingName = v.PackagingName;
         string packaging = packagingName switch
         {
-            "Tape & Reel" or "TR" => "T&R",
-            "Cut Tape" or "CT" => "CT",
-            "Digi-Reel" => "Digi-Reel",
+            var name when name.StartsWith("Tape & Reel", StringComparison.OrdinalIgnoreCase) || name.Equals("TR", StringComparison.OrdinalIgnoreCase) => "T&R",
+            var name when name.StartsWith("Cut Tape", StringComparison.OrdinalIgnoreCase) || name.Equals("CT", StringComparison.OrdinalIgnoreCase) => "CT",
+            var name when name.StartsWith("Digi-Reel", StringComparison.OrdinalIgnoreCase) => "Digi-Reel",
             _ => packagingName
         };
 
@@ -282,11 +283,27 @@ public static class OfferSelector
             spq = moq;
 
         int leadWeeks = 0;
-        if (!string.IsNullOrWhiteSpace(v.ManufacturerLeadWeeks))
+        var manufacturerLeadWeeks = string.IsNullOrWhiteSpace(product.ManufacturerLeadWeeks)
+            ? v.ManufacturerLeadWeeks
+            : product.ManufacturerLeadWeeks;
+        if (!string.IsNullOrWhiteSpace(manufacturerLeadWeeks))
         {
-            var match = Regex.Match(v.ManufacturerLeadWeeks, @"(\d+(?:\.\d+)?)");
+            var match = Regex.Match(manufacturerLeadWeeks, @"(\d+(?:\.\d+)?)");
             if (match.Success && decimal.TryParse(match.Groups[1].Value, out var w))
                 leadWeeks = (int)Math.Ceiling(w);
+        }
+
+        var cancellationWeeks = 4;
+        var rescheduleWeeks = 8;
+        if (v.Ncnr)
+        {
+            cancellationWeeks = leadWeeks;
+            rescheduleWeeks = leadWeeks;
+        }
+        else if (v.QuantityAvailableforPackageType > 0)
+        {
+            cancellationWeeks = 0;
+            rescheduleWeeks = 0;
         }
 
         return new Offer
@@ -302,8 +319,8 @@ public static class OfferSelector
             Ncnr = v.Ncnr,
             Discontinued = v.Discontinued,
             EndOfLife = v.EndOfLife,
-            CancellationWeeks = 2,
-            RescheduleWeeks = 8,
+            CancellationWeeks = cancellationWeeks,
+            RescheduleWeeks = rescheduleWeeks,
             CxlResDbPb = "PB"
         };
     }
@@ -325,7 +342,7 @@ public static class MpnCleaner
         // Normalize whitespace and remove the Excel trailing lowercase "x" marker.
         parts = parts
             .Select(p => Regex.Replace(p.Trim(), @"\s+", " "))
-            .Select(p => Regex.Replace(p, @"x$", ""))
+            .Select(p => Regex.Replace(p, @"x+$", ""))
             .Select(p => p.Trim())
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .ToList();

@@ -70,6 +70,9 @@ public sealed class DigiKeyProduct
     [JsonPropertyName("ManufacturerProductNumber")]
     public string ManufacturerProductNumber { get; set; } = "";
 
+    [JsonPropertyName("ManufacturerLeadWeeks")]
+    public string? ManufacturerLeadWeeks { get; set; }
+
     [JsonPropertyName("ProductVariations")]
     public List<DigiKeyVariation> ProductVariations { get; set; } = [];
 
@@ -96,6 +99,12 @@ public sealed class DigiKeyVariation
 
     [JsonPropertyName("Packaging")]
     public DigiKeyPackaging? Packaging { get; set; }
+
+    [JsonPropertyName("PackageType")]
+    public DigiKeyPackaging? PackageType { get; set; }
+
+    [JsonIgnore]
+    public string PackagingName => (PackageType ?? Packaging)?.Name ?? "";
 
     [JsonPropertyName("QuantityAvailableforPackageType")]
     public int QuantityAvailableforPackageType { get; set; }
