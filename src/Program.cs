@@ -5,10 +5,29 @@ namespace OmpSimple;
 
 class Program
 {
+    private const string Banner = """
+      
+      
+        ███████    ██████   ██████ ███████████      █████████  █████ █████  █████████  ███████████ ██████████ ██████   ██████
+      ███░░░░░███ ░░██████ ██████ ░░███░░░░░███    ███░░░░░███░░███ ░░███  ███░░░░░███░█░░░███░░░█░░███░░░░░█░░██████ ██████ 
+     ███     ░░███ ░███░█████░███  ░███    ░███   ░███    ░░░  ░░███ ███  ░███    ░░░ ░   ░███  ░  ░███  █ ░  ░███░█████░███ 
+    ░███      ░███ ░███░░███ ░███  ░██████████    ░░█████████   ░░█████   ░░█████████     ░███     ░██████    ░███░░███ ░███ 
+    ░███      ░███ ░███ ░░░  ░███  ░███░░░░░░      ░░░░░░░░███   ░░███     ░░░░░░░░███    ░███     ░███░░█    ░███ ░░░  ░███ 
+    ░░███     ███  ░███      ░███  ░███            ███    ░███    ░███     ███    ░███    ░███     ░███ ░   █ ░███      ░███ 
+     ░░░███████░   █████     █████ █████          ░░█████████     █████   ░░█████████     █████    ██████████ █████     █████
+       ░░░░░░░    ░░░░░     ░░░░░ ░░░░░            ░░░░░░░░░     ░░░░░     ░░░░░░░░░     ░░░░░    ░░░░░░░░░░ ░░░░░     ░░░░
+    BY BIZSMART TECHNOLOGY SDN. BHD.
+      
+    
+      
+    """;
+
     static async Task Main()
     {
+        Console.WriteLine(Banner);
         Directory.CreateDirectory("input");
         Directory.CreateDirectory("output");
+        Directory.CreateDirectory("logs");
 
         var inputFiles = Directory.GetFiles("input", "*.xlsx");
         if (inputFiles.Length == 0)
@@ -17,15 +36,29 @@ class Program
             return;
         }
 
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        using var client = new DigiKeyClient(http);
+        var rateTracker = DistributorRateTracker.CreateDefault();
+        var distributor = PromptForDistributor(rateTracker);
+        if (distributor == null) return;
 
-        var mpnCache = new Dictionary<string, (DigiKeySearchResponse? Response, int StatusCode, string? RateLimitLimit, string? RateLimitRemaining)>();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var supplierName = distributor == "1" ? "DigiKey" : "Mouser";
+        using var client = DistributorFactory.Create(distributor, http, rateTracker).Client;
+
+        var mpnCache = new Dictionary<string, SupplierSearchResult>();
         bool rateLimited = false;
         bool authFailed = false;
         bool anyRateLimitOrAuthFailure = false;
         string? lastRateLimitLimit = null;
         string? lastRateLimitRemaining = null;
+        var failureLogPath = Path.Combine("logs", $"api-failures-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+
+        async Task LogApiFailureAsync(string mpn, SupplierSearchResult result)
+        {
+            var entry = $"[{DateTime.Now:O}] supplier={supplierName}, mpn={mpn}, status={result.StatusCode}, " +
+                        $"rateLimit={result.RateLimitLimit ?? "N/A"}, remaining={result.RateLimitRemaining ?? "N/A"}" +
+                        Environment.NewLine + $"response={result.ResponseBody ?? "<empty>"}" + Environment.NewLine + Environment.NewLine;
+            await File.AppendAllTextAsync(failureLogPath, entry);
+        }
 
         foreach (var file in inputFiles)
         {
@@ -34,7 +67,7 @@ class Program
             Console.WriteLine($"  {inputRows.Count} rows read");
 
             var outputRows = new List<OutputRow>();
-            int found = 0, notFound = 0, skipped = 0, digikeyCalls = 0;
+            int found = 0, notFound = 0, skipped = 0, apiCalls = 0;
 
             foreach (var row in inputRows)
             {
@@ -61,39 +94,33 @@ class Program
                 }
                 else
                 {
-                    DigiKeySearchResponse? searchResp;
-                    int statusCode = 0;
-                    string? rateLimitLimit = null;
-                    string? rateLimitRemaining = null;
+                    SupplierSearchResult result;
                     if (mpnCache.TryGetValue(cleanedMpn, out var cached))
                     {
-                        searchResp = cached.Response;
-                        statusCode = cached.StatusCode;
-                        rateLimitLimit = cached.RateLimitLimit;
-                        rateLimitRemaining = cached.RateLimitRemaining;
+                        result = cached;
                     }
                     else
                     {
-                        var (resp, sc, rll, rlr) = await client.SearchAsync(cleanedMpn);
-                        searchResp = resp;
-                        statusCode = sc;
-                        rateLimitLimit = rll;
-                        rateLimitRemaining = rlr;
-                        mpnCache[cleanedMpn] = (searchResp, statusCode, rateLimitLimit, rateLimitRemaining);
-                        digikeyCalls++;
+                        result = await client.SearchAsync(cleanedMpn);
+                        mpnCache[cleanedMpn] = result;
+                        apiCalls++;
 
-                        lastRateLimitLimit = rateLimitLimit;
-                        lastRateLimitRemaining = rateLimitRemaining;
+                        lastRateLimitLimit = result.RateLimitLimit;
+                        lastRateLimitRemaining = result.RateLimitRemaining;
 
-                        if (statusCode == 429)
+                        var isRateLimit = result.StatusCode == 429 ||
+                            (supplierName == "Mouser" && MouserClient.IsRateLimitResponse(result.StatusCode, result.ResponseBody));
+                        if (isRateLimit)
                         {
+                            await LogApiFailureAsync(cleanedMpn, result);
                             rateLimited = true;
                             remarks = "Skipped: rate limit";
                             skipped++;
                             anyRateLimitOrAuthFailure = true;
                         }
-                        else if (statusCode == 401 || statusCode == 403)
+                        else if (result.StatusCode == 401 || result.StatusCode == 403)
                         {
+                            await LogApiFailureAsync(cleanedMpn, result);
                             authFailed = true;
                             remarks = "Skipped: auth failed";
                             skipped++;
@@ -105,10 +132,10 @@ class Program
 
                     if (!rateLimited && !authFailed)
                     {
-                        if (searchResp?.Products.Count > 0)
+                        if (result.Response?.Products.Count > 0)
                         {
                             int qty = int.TryParse(row.Qty, out var q) ? q : 0;
-                            var (offer, offerRemarks) = OfferSelector.SelectBest(searchResp.Products, qty, cleanedMpn, row.Mfg);
+                            var (offer, offerRemarks) = OfferSelector.SelectBest(result.Response!.Products, qty, cleanedMpn, row.Mfg, supplierName);
                             if (offer != null)
                             {
                                 outputRow.ChosenOffer = offer;
@@ -125,7 +152,7 @@ class Program
                         }
                         else
                         {
-                            remarks = statusCode == 404 ? "Not found" : $"HTTP {statusCode}";
+                            remarks = result.StatusCode is 200 or 404 ? "Not found" : $"HTTP {result.StatusCode}";
                             notFound++;
                         }
                     }
@@ -158,6 +185,7 @@ class Program
                 if (anyRateLimitOrAuthFailure)
                 {
                     Console.WriteLine($"  Input NOT deleted (rate limit or auth failure occurred)");
+                    Console.WriteLine($"  API failure details: {failureLogPath}");
                 }
                 else
                 {
@@ -170,7 +198,7 @@ class Program
                 Console.WriteLine($"  ERROR: Output files missing, input NOT deleted");
             }
 
-            Console.WriteLine($"  Summary: found={found}, notFound={notFound}, skipped={skipped}, digikeyCalls={digikeyCalls}");
+            Console.WriteLine($"  Summary: supplier={supplierName}, found={found}, notFound={notFound}, skipped={skipped}, apiCalls={apiCalls}");
             if (!string.IsNullOrEmpty(lastRateLimitLimit) || !string.IsNullOrEmpty(lastRateLimitRemaining))
             {
                 Console.WriteLine($"  X-RateLimit-Limit: {lastRateLimitLimit ?? "N/A"}");
@@ -179,5 +207,34 @@ class Program
         }
 
         Console.WriteLine("Done.");
+    }
+
+    private static string? PromptForDistributor(DistributorRateTracker rateTracker)
+    {
+        Console.WriteLine("Select distributor API:");
+        Console.WriteLine($"  1. DigiKey {rateTracker.GetRemainingDisplay("DigiKey")}");
+        Console.WriteLine($"  2. Mouser {rateTracker.GetRemainingDisplay("Mouser")}");
+        Console.WriteLine("  3. Quit");
+        Console.Write("Choice [1/2/3]: ");
+        var choice = Console.ReadLine()?.Trim();
+        if (choice == "3")
+        {
+            Console.WriteLine("Run stopped.");
+            return null;
+        }
+
+        if (choice is not ("1" or "2"))
+        {
+            Console.WriteLine("Invalid choice. Exiting.");
+            return null;
+        }
+
+        if (choice == "2" && string.IsNullOrWhiteSpace(Credentials.MouserApiKey))
+        {
+            Console.WriteLine("MouserApiKey missing in C:\\Users\\hariz\\omp-digikey.txt");
+            return null;
+        }
+
+        return choice;
     }
 }

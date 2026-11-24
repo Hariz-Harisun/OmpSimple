@@ -5,12 +5,12 @@ namespace OmpSimple;
 
 public static class OfferSelector
 {
-    public static (Offer? offer, string remarks) SelectBest(IReadOnlyList<DigiKeyProduct> products, int qty, string originalMpn, string originalMfg = "")
+    public static (Offer? offer, string remarks) SelectBest(IReadOnlyList<DigiKeyProduct> products, int qty, string originalMpn, string originalMfg = "", string supplier = "DigiKey")
     {
         var candidates = products
             .Select((product, index) =>
             {
-                var result = SelectBest(product, qty, originalMpn, originalMfg);
+                var result = SelectBest(product, qty, originalMpn, originalMfg, supplier);
                 return (product, index, result.offer, result.remarks);
             })
             .Where(candidate => candidate.offer != null)
@@ -28,10 +28,10 @@ public static class OfferSelector
         if (products.Count == 0)
             return (null, "Not found");
 
-        return SelectBest(products[0], qty, originalMpn, originalMfg);
+        return SelectBest(products[0], qty, originalMpn, originalMfg, supplier);
     }
 
-    public static (Offer? offer, string remarks) SelectBest(DigiKeyProduct product, int qty, string originalMpn, string originalMfg = "")
+    public static (Offer? offer, string remarks) SelectBest(DigiKeyProduct product, int qty, string originalMpn, string originalMfg = "", string supplier = "DigiKey")
     {
         var remarks = new List<string>();
 
@@ -85,7 +85,7 @@ public static class OfferSelector
             {
                 bestPrice = price;
                 bestMoq = moq;
-                best = BuildOffer(product, v, price, moq, eq);
+                best = BuildOffer(product, v, price, moq, eq, supplier);
             }
         }
 
@@ -110,8 +110,9 @@ public static class OfferSelector
         }
 
         // DigiKey search does not state COO.
-        best.Coo = "Not stated.";
-        remarks.Add("COO missing");
+        best.Coo = product.MouserCountryOfOrigin ?? "Not stated.";
+        if (string.IsNullOrWhiteSpace(product.MouserCountryOfOrigin))
+            remarks.Add("COO missing");
 
         if (best.TariffActive) remarks.Add("Tariff active");
         if (best.Ncnr) remarks.Add("NCNR");
@@ -267,7 +268,7 @@ public static class OfferSelector
         return applicable.MaxBy(p => p.BreakQuantity)!.UnitPrice;
     }
 
-    private static Offer BuildOffer(DigiKeyProduct product, DigiKeyVariation v, decimal price, int moq, int effectiveQty)
+    private static Offer BuildOffer(DigiKeyProduct product, DigiKeyVariation v, decimal price, int moq, int effectiveQty, string supplier)
     {
         var packagingName = v.PackagingName;
         string packaging = packagingName switch
@@ -293,14 +294,15 @@ public static class OfferSelector
                 leadWeeks = (int)Math.Ceiling(w);
         }
 
-        var cancellationWeeks = 4;
-        var rescheduleWeeks = 8;
-        if (v.Ncnr)
+        var isMouser = string.Equals(supplier, "Mouser", StringComparison.OrdinalIgnoreCase);
+        var cancellationWeeks = isMouser ? 0 : 4;
+        var rescheduleWeeks = isMouser ? 0 : 8;
+        if (!isMouser && v.Ncnr)
         {
             cancellationWeeks = leadWeeks;
             rescheduleWeeks = leadWeeks;
         }
-        else if (v.QuantityAvailableforPackageType > 0)
+        else if (!isMouser && v.QuantityAvailableforPackageType > 0)
         {
             cancellationWeeks = 0;
             rescheduleWeeks = 0;
@@ -308,6 +310,7 @@ public static class OfferSelector
 
         return new Offer
         {
+            Supplier = supplier,
             Mfg = product.Manufacturer?.Name ?? "",
             Mpn = product.ManufacturerProductNumber,
             UnitPrice = price,
@@ -321,7 +324,7 @@ public static class OfferSelector
             EndOfLife = v.EndOfLife,
             CancellationWeeks = cancellationWeeks,
             RescheduleWeeks = rescheduleWeeks,
-            CxlResDbPb = "PB"
+            CxlResDbPb = isMouser ? "N/A" : "PB"
         };
     }
 }

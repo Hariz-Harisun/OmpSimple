@@ -18,10 +18,10 @@ public sealed class DigiKeyClient : IDisposable
         _http.BaseAddress = new Uri("https://api.digikey.com/");
     }
 
-    public async Task<string?> GetTokenAsync(CancellationToken ct = default)
+    public async Task<(string? Token, int StatusCode, string? ResponseBody)> GetTokenAsync(CancellationToken ct = default)
     {
         if (!string.IsNullOrEmpty(_accessToken) && DateTime.UtcNow < _tokenExpiry.AddSeconds(-60))
-            return _accessToken;
+            return (_accessToken, 200, null);
 
         var body = new FormUrlEncodedContent(new[]
         {
@@ -31,24 +31,24 @@ public sealed class DigiKeyClient : IDisposable
         });
 
         var resp = await _http.PostAsync("v1/oauth2/token", body, ct);
+        var responseBody = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
-            return null;
+            return (null, (int)resp.StatusCode, responseBody);
 
-        var json = await resp.Content.ReadAsStringAsync(ct);
-        var tokenResp = JsonSerializer.Deserialize<DigiKeyTokenResponse>(json, _jsonOptions);
+        var tokenResp = JsonSerializer.Deserialize<DigiKeyTokenResponse>(responseBody, _jsonOptions);
         if (tokenResp == null)
-            return null;
+            return (null, (int)resp.StatusCode, responseBody);
 
         _accessToken = tokenResp.AccessToken;
         _tokenExpiry = DateTime.UtcNow.AddSeconds(tokenResp.ExpiresIn);
-        return _accessToken;
+        return (_accessToken, (int)resp.StatusCode, responseBody);
     }
 
-    public async Task<(DigiKeySearchResponse? Response, int StatusCode, string? RateLimitLimit, string? RateLimitRemaining)> SearchAsync(string mpn, CancellationToken ct = default)
+    public async Task<(DigiKeySearchResponse? Response, int StatusCode, string? RateLimitLimit, string? RateLimitRemaining, string? ResponseBody)> SearchAsync(string mpn, CancellationToken ct = default)
     {
-        var token = await GetTokenAsync(ct);
+        var (token, tokenStatusCode, tokenResponseBody) = await GetTokenAsync(ct);
         if (string.IsNullOrEmpty(token))
-            return (null, 401, null, null);
+            return (null, tokenStatusCode == 200 ? 401 : tokenStatusCode, null, null, tokenResponseBody);
 
         var request = new HttpRequestMessage(HttpMethod.Post, "products/v4/search/keyword")
         {
@@ -67,11 +67,12 @@ public sealed class DigiKeyClient : IDisposable
         var rateLimitLimit = resp.Headers.TryGetValues("X-RateLimit-Limit", out var vals) ? vals.FirstOrDefault() : null;
         var rateLimitRemaining = resp.Headers.TryGetValues("X-RateLimit-Remaining", out var vals2) ? vals2.FirstOrDefault() : null;
 
+        var responseBody = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
-            return (null, (int)resp.StatusCode, rateLimitLimit, rateLimitRemaining);
+            return (null, (int)resp.StatusCode, rateLimitLimit, rateLimitRemaining, responseBody);
 
-        var json = await resp.Content.ReadAsStringAsync(ct);
-        return (JsonSerializer.Deserialize<DigiKeySearchResponse>(json, _jsonOptions), 200, rateLimitLimit, rateLimitRemaining);
+        return (JsonSerializer.Deserialize<DigiKeySearchResponse>(responseBody, _jsonOptions),
+            (int)resp.StatusCode, rateLimitLimit, rateLimitRemaining, responseBody);
     }
 
     public void Dispose() => _http.Dispose();
