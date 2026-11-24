@@ -1,6 +1,6 @@
 # OmpSimple
 
-Simple .NET 10 console app that processes Excel files from `input/`, queries DigiKey API for each MPN, and writes enriched results to `output/` as JSON and Excel.
+Simple .NET 10 console app that processes Excel files from `input/`, queries a selected distributor API (DigiKey or Mouser) for each MPN, and writes enriched results to `output/` as JSON and Excel.
 
 ## Setup
 
@@ -9,8 +9,9 @@ Simple .NET 10 console app that processes Excel files from `input/`, queries Dig
    ClientId=your_client_id
    ClientSecret=your_client_secret
    AccountId=your_account_id
+   MouserApiKey=your_mouser_api_key
    ```
-   (AccountId can be empty)
+   (AccountId and MouserApiKey can be empty when using DigiKey only.)
 
 2. Copy `src/Credentials.example.cs` to `src/Credentials.cs` (already in .gitignore — never commit real keys).
 
@@ -41,9 +42,9 @@ For each input file `foo.xlsx`:
 | 12 | SPQ | `StandardPackage` (or MOQ if Tape & Reel) |
 | 13 | MOQ | Variation's `MinimumOrderQuantity` |
 | 14 | Lead Time (WKS) | Parsed from `ManufacturerLeadWeeks` |
-| 15 | Cancellation (WKS) | 2 (default) |
-| 16 | Reschedule (WKS) | 8 (default) |
-| 17 | CXL & RES DB/PB | "PB" (default) |
+| 15 | Cancellation (WKS) | DigiKey logic; Mouser `0` |
+| 16 | Reschedule (WKS) | DigiKey logic; Mouser `0` |
+| 17 | CXL & RES DB/PB | DigiKey `PB`; Mouser `N/A` |
 | 18 | Packaging | Mapped from DigiKey name |
 | 19 | Authorised Distributor | "Yes" |
 | 20 | RoHS/REACH | "Yes" if both compliant |
@@ -60,5 +61,8 @@ dotnet test
 
 - `input/` and `output/` are in .gitignore
 - `src/Credentials.cs` is in .gitignore; commit only `src/Credentials.example.cs`
-- Rate limit: ~600ms between DigiKey calls; on HTTP 429 remaining rows marked "Skipped: rate limit"
+- At startup, choose `1` for DigiKey or `2` for Mouser; each option shows remaining daily quota
+- Rate state persists in the system temp file `OmpSimple-rate-limits.json`; it resets daily
+- Mouser defaults: 30 calls/minute, 1,000 calls/day, 50 results per batch; the client waits and retries automatically when the minute limit is reached
+- API failure logs: `logs/api-failures-<timestamp>.log` (keys excluded)
 - MPN cleaning: first MPN used, alternates in Remarks; brackets removed; "SMT;" rows skipped

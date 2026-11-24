@@ -78,6 +78,9 @@ public sealed class DigiKeyProduct
 
     [JsonPropertyName("Classifications")]
     public DigiKeyClassifications? Classifications { get; set; }
+
+    [JsonIgnore]
+    public string? MouserCountryOfOrigin { get; set; }
 }
 
 public sealed class DigiKeyManufacturer
@@ -153,4 +156,62 @@ public sealed class DigiKeyClassifications
 
     [JsonPropertyName("ReachStatus")]
     public string? ReachStatus { get; set; }
+}
+
+public sealed class MouserSearchResponse
+{
+    public List<MouserError> Errors { get; set; } = [];
+    public MouserSearchResults? SearchResults { get; set; }
+}
+
+public sealed class MouserSearchResults
+{
+    public int NumberOfResult { get; set; }
+    public List<MouserPart> Parts { get; set; } = [];
+}
+
+public sealed class MouserError
+{
+    public int Id { get; set; }
+    public string Code { get; set; } = "";
+    public string Message { get; set; } = "";
+}
+
+public sealed class MouserPart
+{
+    public string? Availability { get; set; }
+    public string? LeadTime { get; set; }
+    public string? Manufacturer { get; set; }
+    public string? ManufacturerPartNumber { get; set; }
+    public string? MouserPartNumber { get; set; }
+    public string? Min { get; set; }
+    public string? Mult { get; set; }
+    public string? AvailabilityInStock { get; set; }
+    public string? ROHSStatus { get; set; }
+    public List<MouserProductAttribute> ProductAttributes { get; set; } = [];
+    public List<MouserPriceBreak> PriceBreaks { get; set; } = [];
+    public List<MouserCompliance> ProductCompliance { get; set; } = [];
+    public List<MouserCompliance> TradeCompliance { get; set; } = [];
+}
+
+public sealed class MouserProductAttribute
+{
+    public string? AttributeName { get; set; }
+    public string? AttributeValue { get; set; }
+    public string? AttributeCost { get; set; }
+}
+
+public sealed class MouserPriceBreak
+{
+    public int Quantity { get; set; }
+    public decimal RawPrice { get; set; }
+    public string? Price { get; set; }
+    public string? Currency { get; set; }
+}
+
+public sealed class MouserCompliance
+{
+    public string? ComplianceName { get; set; }
+    public string? ComplianceValue { get; set; }
+    public string? ComplianceDescription { get; set; }
 }
