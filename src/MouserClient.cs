@@ -240,7 +240,16 @@ public static class DistributorFactory
         {
             "1" => ("DigiKey", new DigiKeyDistributorClient(http, rateTracker)),
             "2" => ("Mouser", new MouserClient(http, Credentials.MouserApiKey, rateTracker)),
-            _ => throw new ArgumentException("Choose 1 for DigiKey or 2 for Mouser.", nameof(choice))
+            "3" => ("Element14", new Element14Client(http, Credentials.Element14ApiKey, Credentials.Element14StoreId, rateTracker)),
+            _ => throw new ArgumentException("Choose 1 for DigiKey, 2 for Mouser, or 3 for Element14.", nameof(choice))
         };
     }
+
+    public static string CreateName(string choice) => choice switch
+    {
+        "1" => "DigiKey",
+        "2" => "Mouser",
+        "3" => "Element14",
+        _ => throw new ArgumentException("Unknown distributor choice.", nameof(choice))
+    };
 }

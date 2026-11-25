@@ -64,6 +64,12 @@ public sealed class DigiKeySearchResponse
 
 public sealed class DigiKeyProduct
 {
+    [JsonIgnore]
+    public string Currency { get; set; } = "USD";
+
+    [JsonIgnore]
+    public bool ExactKeywordMatch { get; set; }
+
     [JsonPropertyName("Manufacturer")]
     public DigiKeyManufacturer? Manufacturer { get; set; }
 

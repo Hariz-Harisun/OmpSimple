@@ -27,6 +27,7 @@ public sealed class DistributorRateTracker
 
         AddDefaultIfMissing(states, "DigiKey", perMinuteLimit: 30, dailyLimit: 1000, batchSize: 50);
         AddDefaultIfMissing(states, "Mouser", perMinuteLimit: 30, dailyLimit: 1000, batchSize: 50);
+        AddDefaultIfMissing(states, "Element14", perMinuteLimit: 2, dailyLimit: 1000, batchSize: 10);
         return new DistributorRateTracker(statePath, states);
     }
 
@@ -45,7 +46,7 @@ public sealed class DistributorRateTracker
         var percentage = state.DailyLimit == 0 ? 0 : remaining * 100d / state.DailyLimit;
         var filled = (int)Math.Round(percentage / 100d * DisplayBarWidth, MidpointRounding.AwayFromZero);
         var bar = new string('#', filled) + new string('-', DisplayBarWidth - filled);
-        return $" [{bar}] {percentage:0.0}% ({remaining} / {state.DailyLimit})";
+        return $"Remaining [{bar}] {percentage:0.0}% ({remaining} / {state.DailyLimit})";
     }
 
     public void RecordCalls(string distributor, int calls)

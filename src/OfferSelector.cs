@@ -40,7 +40,7 @@ public static class OfferSelector
 
         // MPN match check
         var returnedMpn = product.ManufacturerProductNumber ?? "";
-        if (!MpnMatch(cleanedMpn: originalMpn, returnedMpn))
+        if (!product.ExactKeywordMatch && !MpnMatch(cleanedMpn: originalMpn, returnedMpn))
         {
             return (null, $"Not found (closest: {returnedMpn})");
         }
@@ -313,6 +313,7 @@ public static class OfferSelector
             Supplier = supplier,
             Mfg = product.Manufacturer?.Name ?? "",
             Mpn = product.ManufacturerProductNumber,
+            Currency = product.Currency,
             UnitPrice = price,
             Spq = spq,
             Moq = moq,

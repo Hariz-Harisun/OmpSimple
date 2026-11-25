@@ -41,8 +41,9 @@ class Program
         if (distributor == null) return;
 
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        var supplierName = distributor == "1" ? "DigiKey" : "Mouser";
-        using var client = DistributorFactory.Create(distributor, http, rateTracker).Client;
+        var distributorClient = DistributorFactory.Create(distributor, http, rateTracker);
+        var supplierName = distributorClient.Name;
+        using var client = distributorClient.Client;
 
         var mpnCache = new Dictionary<string, SupplierSearchResult>();
         bool rateLimited = false;
@@ -75,7 +76,8 @@ class Program
                 string remarks = "";
 
                 var (cleanedMpn, alternates) = MpnCleaner.Clean(row.Mpn);
-                if (string.IsNullOrWhiteSpace(cleanedMpn) || cleanedMpn.StartsWith("SMT;", StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(cleanedMpn) ||
+                    (supplierName != "Element14" && cleanedMpn.StartsWith("SMT;", StringComparison.OrdinalIgnoreCase)))
                 {
                     remarks = "Skipped: not a real MPN";
                     skipped++;
@@ -214,16 +216,17 @@ class Program
         Console.WriteLine("Select distributor API:");
         Console.WriteLine($"  1. DigiKey {rateTracker.GetRemainingDisplay("DigiKey")}");
         Console.WriteLine($"  2. Mouser {rateTracker.GetRemainingDisplay("Mouser")}");
-        Console.WriteLine("  3. Quit");
-        Console.Write("Choice [1/2/3]: ");
+        Console.WriteLine($"  3. Element14 {rateTracker.GetRemainingDisplay("Element14")}");
+        Console.WriteLine("  4. Quit");
+        Console.Write("Choice [1/2/3/4]: ");
         var choice = Console.ReadLine()?.Trim();
-        if (choice == "3")
+        if (choice == "4")
         {
             Console.WriteLine("Run stopped.");
             return null;
         }
 
-        if (choice is not ("1" or "2"))
+        if (choice is not ("1" or "2" or "3"))
         {
             Console.WriteLine("Invalid choice. Exiting.");
             return null;
@@ -232,6 +235,12 @@ class Program
         if (choice == "2" && string.IsNullOrWhiteSpace(Credentials.MouserApiKey))
         {
             Console.WriteLine("MouserApiKey missing in C:\\Users\\hariz\\omp-digikey.txt");
+            return null;
+        }
+
+        if (choice == "3" && string.IsNullOrWhiteSpace(Credentials.Element14ApiKey))
+        {
+            Console.WriteLine("Element14ApiKey missing in C:\\Users\\hariz\\omp-digikey.txt");
             return null;
         }
 
