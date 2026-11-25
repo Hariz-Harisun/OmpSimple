@@ -8,6 +8,37 @@ namespace OmpSimple.Tests;
 public class OfferSelectorTests
 {
     [Fact]
+    public void DigiKeyKeywordSearch_SelectsExactCapacitorFromResults()
+    {
+        var products = new List<DigiKeyProduct>
+        {
+            new() { ManufacturerProductNumber = "OTHER", ProductDescription = "1 µF, 10 V, 0603, X5R" },
+            new() { ManufacturerProductNumber = "MC0603X225K100CT", ProductDescription = "2.2 µF, 10 V, 0603, ±10%, X5R" }
+        };
+
+        var selected = Element14Query.SelectExact(products, "SMT;SMD0603;2u2;+10%;-10%;10V;X5R");
+
+        Assert.Same(products[1], selected);
+    }
+
+    [Fact]
+    public void DigiKeyKeywordSearch_UsesExactProductWithoutMpnEquality()
+    {
+        var product = new DigiKeyProduct
+        {
+            ExactKeywordMatch = true,
+            ManufacturerProductNumber = "MC0603X225K100CT",
+            ProductDescription = "2.2 µF, 10 V, 0603, ±10%, X5R",
+            ProductVariations = [CreateVariation()]
+        };
+
+        var (offer, _) = OfferSelector.SelectBest(product, 1, "SMT;SMD0603;2u2;+10%;-10%;10V;X5R");
+
+        Assert.NotNull(offer);
+        Assert.Equal("MC0603X225K100CT", offer.Mpn);
+    }
+
+    [Fact]
     public void SelectBest_PicksCheapestPrice()
     {
         var product = new DigiKeyProduct

@@ -76,6 +76,9 @@ public sealed class DigiKeyProduct
     [JsonPropertyName("ManufacturerProductNumber")]
     public string ManufacturerProductNumber { get; set; } = "";
 
+    [JsonPropertyName("Description")]
+    public string ProductDescription { get; set; } = "";
+
     [JsonPropertyName("ManufacturerLeadWeeks")]
     public string? ManufacturerLeadWeeks { get; set; }
 

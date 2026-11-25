@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using OmpSimple.Models;
 
 namespace OmpSimple;
 
@@ -30,6 +31,17 @@ public static class Element14Query
 
     public static Element14Product? SelectExact(IReadOnlyList<Element14Product> products, string specification)
     {
+        return SelectExactCore(products, specification, product => product.DisplayName ?? "");
+    }
+
+    public static DigiKeyProduct? SelectExact(IReadOnlyList<DigiKeyProduct> products, string specification)
+    {
+        return SelectExactCore(products, specification, product =>
+            $"{product.ManufacturerProductNumber} {product.ProductDescription}");
+    }
+
+    private static T? SelectExactCore<T>(IReadOnlyList<T> products, string specification, Func<T, string> displayName)
+    {
         var fields = specification.Split(';', StringSplitOptions.TrimEntries);
         var capacitance = NormalizeCapacitance(fields.ElementAtOrDefault(2) ?? "");
         var size = Regex.Match(fields.ElementAtOrDefault(1) ?? "", @"(?i)(\d{4})").Groups[1].Value;
@@ -41,8 +53,7 @@ public static class Element14Query
             .Select(product => new
             {
                 Product = product,
-                Name = NormalizeToken(product.DisplayName ?? ""),
-                Score = Score(product.DisplayName ?? "", capacitance, size, voltage, dielectric, tolerance)
+                Score = Score(displayName(product), capacitance, size, voltage, dielectric, tolerance)
             })
             .Where(item => item.Score >= 4)
             .OrderByDescending(item => item.Score)
