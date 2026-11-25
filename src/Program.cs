@@ -208,7 +208,8 @@ class Program
             }
 
             Console.WriteLine($"  Summary: supplier={supplierName}, found={found}, notFound={notFound}, skipped={skipped}, apiCalls={apiCalls}");
-            if (!string.IsNullOrEmpty(lastRateLimitLimit) || !string.IsNullOrEmpty(lastRateLimitRemaining))
+            if (supplierName != "DigiKey" &&
+                (!string.IsNullOrEmpty(lastRateLimitLimit) || !string.IsNullOrEmpty(lastRateLimitRemaining)))
             {
                 Console.WriteLine($"  X-RateLimit-Limit: {lastRateLimitLimit ?? "N/A"}");
                 Console.WriteLine($"  X-RateLimit-Remaining: {lastRateLimitRemaining ?? "N/A"}");
