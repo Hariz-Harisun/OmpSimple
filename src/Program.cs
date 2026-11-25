@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using OmpSimple.Models;
 
@@ -69,9 +70,13 @@ class Program
 
             var outputRows = new List<OutputRow>();
             int found = 0, notFound = 0, skipped = 0, apiCalls = 0;
+            var processingClock = Stopwatch.StartNew();
+            var processing = ProcessingIndicator.Start();
 
-            foreach (var row in inputRows)
+            try
             {
+                foreach (var row in inputRows)
+                {
                 var outputRow = new OutputRow { Input = row };
                 string remarks = "";
 
@@ -165,7 +170,9 @@ class Program
 
                 outputRow.Remarks = remarks;
                 outputRows.Add(outputRow);
-            }
+                }
+
+            processing.Dispose();
 
             var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
             var baseName = Path.GetFileNameWithoutExtension(file);
@@ -205,6 +212,14 @@ class Program
             {
                 Console.WriteLine($"  X-RateLimit-Limit: {lastRateLimitLimit ?? "N/A"}");
                 Console.WriteLine($"  X-RateLimit-Remaining: {lastRateLimitRemaining ?? "N/A"}");
+            }
+
+            var elapsed = processingClock.Elapsed;
+            Console.WriteLine($"  Time processed: {elapsed.TotalSeconds:0.00} seconds");
+            }
+            finally
+            {
+                processing.Dispose();
             }
         }
 
