@@ -8,6 +8,27 @@ namespace OmpSimple.Tests;
 public class DigiKeyTests
 {
     [Fact]
+    public void ProductDescription_AcceptsDigiKeyObjectShape()
+    {
+        const string json = """
+        {
+          "Products": [{
+            "ManufacturerProductNumber": "MC0603X225K100CT",
+            "Description": {
+              "ProductDescription": "2.2 µF, 10 V, 0603, ±10%, X5R",
+              "DetailedDescription": "Multilayer ceramic capacitor"
+            }
+          }]
+        }
+        """;
+
+        var response = System.Text.Json.JsonSerializer.Deserialize<DigiKeySearchResponse>(json)!;
+
+        Assert.Contains("2.2 µF, 10 V, 0603", response.Products[0].ProductDescription);
+        Assert.Contains("Multilayer ceramic capacitor", response.Products[0].ProductDescription);
+    }
+
+    [Fact]
     public async Task Client_UsesNormalizedKeywordAndSelectsExactSpecification()
     {
         var handler = new CapturingHandler(request =>
