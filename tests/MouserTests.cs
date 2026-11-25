@@ -129,6 +129,53 @@ public class MouserTests
     }
 
     [Fact]
+    public void MouserStructuredSearch_AddsAlternateToleranceRemark()
+    {
+        var product = MouserMapper.ToDigiKeyProduct(new MouserPart
+        {
+            Manufacturer = "TAIYO YUDEN",
+            ManufacturerPartNumber = "MCASE105AB5474MFNA01",
+            Description = "470 nF, 16 V, 0402, ±20%, X5R",
+            Min = "1",
+            AvailabilityInStock = "10000",
+            PriceBreaks = [new MouserPriceBreak { Quantity = 1, RawPrice = 0.19m, Currency = "USD" }]
+        });
+        product.ExactKeywordMatch = true;
+
+        var (offer, remarks) = OfferSelector.SelectBest(
+            product,
+            4,
+            "SMT;SMD0402;470n;+10%;-10%;16V;X5R",
+            supplier: "Mouser");
+
+        Assert.NotNull(offer);
+        Assert.Contains("Alternate: 20% tolerance", remarks);
+    }
+
+    [Fact]
+    public void MouserStructuredSearch_DoesNotRemarkOnRequestedTolerance()
+    {
+        var product = MouserMapper.ToDigiKeyProduct(new MouserPart
+        {
+            ManufacturerPartNumber = "TEST-470N",
+            Description = "470 nF, 16 V, 0402, ±10%, X5R",
+            Min = "1",
+            AvailabilityInStock = "10000",
+            PriceBreaks = [new MouserPriceBreak { Quantity = 1, RawPrice = 0.20m, Currency = "USD" }]
+        });
+        product.ExactKeywordMatch = true;
+
+        var (offer, remarks) = OfferSelector.SelectBest(
+            product,
+            4,
+            "SMT;SMD0402;470n;+10%;-10%;16V;X5R",
+            supplier: "Mouser");
+
+        Assert.NotNull(offer);
+        Assert.DoesNotContain("Alternate:", remarks);
+    }
+
+    [Fact]
     public async Task MouserClient_PostsExpectedRequestAndParsesResponse()
     {
         string? requestBody = null;
