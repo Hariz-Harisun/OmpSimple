@@ -47,8 +47,8 @@ internal sealed class ProcessingIndicator : IDisposable
 
     private void WriteStatus()
     {
-        var dots = new string('.', _frame % 3 + 1);
-        var status = $"Processing{dots} (time running {_clock.Elapsed.TotalSeconds:0.00})";
+        var dots = new string('.', _frame % 4).PadRight(3);
+        var status = $"Processing{dots} (time running {_clock.Elapsed.TotalSeconds:0.00} seconds)";
         var padding = new string(' ', Math.Max(0, _lastWidth - status.Length));
         Console.Write($"\r{status}{padding}");
         _lastWidth = status.Length;
