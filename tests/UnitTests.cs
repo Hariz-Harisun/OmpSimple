@@ -5,6 +5,54 @@ using Xunit;
 
 namespace OmpSimple.Tests;
 
+public class LowestPriceSelectorTests
+{
+    [Fact]
+    public void Select_ChoosesLowestPriceAndKeepsDistributorOrderOnTie()
+    {
+        var input = new InputRow { RowNumber = 2, Mpn = "TEST" };
+        var digiKey = new OutputRow
+        {
+            Input = input,
+            ChosenOffer = new Offer { Supplier = "DigiKey", Currency = "USD", UnitPrice = 1.00m }
+        };
+        var mouser = new OutputRow
+        {
+            Input = input,
+            ChosenOffer = new Offer { Supplier = "Mouser", Currency = "USD", UnitPrice = 1.00m }
+        };
+        var element14 = new OutputRow
+        {
+            Input = input,
+            ChosenOffer = new Offer { Supplier = "Element14", Currency = "USD", UnitPrice = 2.00m }
+        };
+
+        var selected = LowestPriceSelector.Select([[digiKey], [mouser], [element14]]);
+
+        Assert.Single(selected);
+        Assert.NotNull(selected[0].ChosenOffer);
+        var selectedOffer = selected[0].ChosenOffer!;
+        Assert.Equal("DigiKey", selectedOffer.Supplier);
+        Assert.Equal(1.00m, selectedOffer.UnitPrice);
+    }
+
+    [Fact]
+    public void Select_HandlesPartsMissingFromSomeDistributors()
+    {
+        var input = new InputRow { RowNumber = 2, Mpn = "TEST" };
+        var mouser = new OutputRow
+        {
+            Input = input,
+            ChosenOffer = new Offer { Supplier = "Mouser", UnitPrice = 0.50m }
+        };
+
+        var selected = LowestPriceSelector.Select([[], [mouser], []]);
+
+        Assert.Single(selected);
+        Assert.Equal("Mouser", selected[0].ChosenOffer!.Supplier);
+    }
+}
+
 public class OfferSelectorTests
 {
     [Fact]

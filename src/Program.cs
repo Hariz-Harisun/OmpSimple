@@ -30,16 +30,29 @@ class Program
         Directory.CreateDirectory("output");
         Directory.CreateDirectory("logs");
 
+        var rateTracker = DistributorRateTracker.CreateDefault();
+        while (true)
+        {
+            var choice = PromptForDistributor(rateTracker);
+            if (choice == null) return;
+            if (choice == "4")
+            {
+                RunLowestPriceSelection();
+                continue;
+            }
+
+            await ProcessDistributorAsync(choice, rateTracker);
+        }
+    }
+
+    private static async Task ProcessDistributorAsync(string distributor, DistributorRateTracker rateTracker)
+    {
         var inputFiles = Directory.GetFiles("input", "*.xlsx");
         if (inputFiles.Length == 0)
         {
             Console.WriteLine("No .xlsx files in input/");
             return;
         }
-
-        var rateTracker = DistributorRateTracker.CreateDefault();
-        var distributor = PromptForDistributor(rateTracker);
-        if (distributor == null) return;
 
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         var distributorClient = DistributorFactory.Create(distributor, http, rateTracker);
@@ -234,18 +247,19 @@ class Program
         Console.WriteLine($"  1. DigiKey {rateTracker.GetRemainingDisplay("DigiKey")}");
         Console.WriteLine($"  2. Mouser {rateTracker.GetRemainingDisplay("Mouser")}");
         Console.WriteLine($"  3. Element14 {rateTracker.GetRemainingDisplay("Element14")}");
-        Console.WriteLine("  4. Quit");
-        Console.Write("Choice [1/2/3/4]: ");
+        Console.WriteLine("  4. Lowest Price Selection");
+        Console.WriteLine("  5. Quit");
+        Console.Write("Choice [1/2/3/4/5]: ");
         var choice = Console.ReadLine()?.Trim();
-        if (choice == "4")
+        if (choice == "5")
         {
             Console.WriteLine("Run stopped.");
             return null;
         }
 
-        if (choice is not ("1" or "2" or "3"))
+        if (choice is not ("1" or "2" or "3" or "4"))
         {
-            Console.WriteLine("Invalid choice. Exiting.");
+            Console.WriteLine("Invalid choice. Exiting");
             return null;
         }
 
@@ -262,5 +276,80 @@ class Program
         }
 
         return choice;
+    }
+
+    private static bool RunLowestPriceSelection()
+    {
+        Console.Write("Enter quotation_id: ");
+        var quotationId = Console.ReadLine()?.Trim();
+        if (string.IsNullOrWhiteSpace(quotationId))
+        {
+            Console.WriteLine("Quotation ID is required. Returning to menu.");
+            return false;
+        }
+
+        var selectedFiles = Directory.GetFiles("output", $"{quotationId}_*.xlsx")
+            .Select(path => new { Path = path, Name = Path.GetFileNameWithoutExtension(path) })
+            .Select(file =>
+            {
+                foreach (var supplier in new[] { "DigiKey", "Mouser", "Element14" })
+                {
+                    var suffix = $"-{supplier}";
+                    if (!file.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) continue;
+                    var timestampText = file.Name[(quotationId.Length + 1)..^suffix.Length];
+                    if (DateTime.TryParseExact(timestampText, "yyyyMMdd-HHmmss", null, System.Globalization.DateTimeStyles.None, out var timestamp))
+                        return new { file.Path, Supplier = supplier, Timestamp = timestamp };
+                }
+
+                return null;
+            })
+            .Where(file => file != null)
+            .GroupBy(file => file!.Supplier, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderByDescending(file => file!.Timestamp).First()!)
+            .OrderBy(file => Array.IndexOf(new[] { "DigiKey", "Mouser", "Element14" }, file.Supplier))
+            .ToList();
+
+        if (selectedFiles.Count == 0)
+        {
+            Console.WriteLine($"No distributor files found for quotation_id '{quotationId}'. Returning to menu.");
+            return false;
+        }
+
+        var distributorRows = new List<IReadOnlyList<OutputRow>>();
+        foreach (var file in selectedFiles)
+        {
+            var jsonPath = Path.ChangeExtension(file.Path, ".json");
+            List<OutputRow> rows;
+            if (File.Exists(jsonPath))
+            {
+                rows = JsonSerializer.Deserialize<List<OutputRow>>(File.ReadAllText(jsonPath)) ?? [];
+            }
+            else
+            {
+                rows = ExcelProcessor.ReadOutput(file.Path);
+            }
+
+            if (rows.Count == 0)
+            {
+                Console.WriteLine($"  Skipping {file.Supplier}: no readable rows");
+                continue;
+            }
+
+            distributorRows.Add(rows);
+            Console.WriteLine($"  Using {file.Supplier}: {file.Path}");
+        }
+
+        if (distributorRows.Count == 0)
+        {
+            Console.WriteLine("No readable distributor data found. Returning to menu.");
+            return false;
+        }
+
+        var lowestRows = LowestPriceSelector.Select(distributorRows);
+        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var outputPath = Path.Combine("output", $"{quotationId}_lowest_price_{timestamp}.xlsx");
+        ExcelProcessor.WriteLowestPrice(outputPath, lowestRows);
+        Console.WriteLine($"Lowest price Excel saved: {outputPath}");
+        return true;
     }
 }

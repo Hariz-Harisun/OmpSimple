@@ -36,6 +36,60 @@ public static class ExcelProcessor
         return rows;
     }
 
+    public static List<OutputRow> ReadOutput(string filePath)
+    {
+        var rows = new List<OutputRow>();
+        using var wb = new XLWorkbook(filePath);
+        var ws = wb.Worksheets.FirstOrDefault(w => w.Name == "LT Quote") ?? wb.Worksheets.First();
+        var firstRow = ws.FirstRowUsed();
+        if (firstRow == null) return rows;
+
+        int headerRow = firstRow.RowNumber();
+        int lastRow = ws.LastRowUsed()?.RowNumber() ?? headerRow;
+        for (int r = headerRow + 1; r <= lastRow; r++)
+        {
+            var row = ws.Row(r);
+            if (row.IsEmpty()) continue;
+
+            var output = new OutputRow
+            {
+                Input = new InputRow
+                {
+                    RowNumber = r,
+                    PnNumber = row.Cell(1).GetString(),
+                    Description = row.Cell(2).GetString(),
+                    Mfg = row.Cell(3).GetString(),
+                    Mpn = row.Cell(4).GetString(),
+                    Qty = row.Cell(5).GetString(),
+                    Eau = row.Cell(6).GetString()
+                },
+                Remarks = row.Cell(22).GetString()
+            };
+
+            var supplier = row.Cell(7).GetString();
+            if (!string.IsNullOrWhiteSpace(supplier) &&
+                decimal.TryParse(row.Cell(11).GetString(), out var unitPrice))
+            {
+                output.ChosenOffer = new Offer
+                {
+                    Supplier = supplier,
+                    Mfg = row.Cell(8).GetString(),
+                    Mpn = row.Cell(9).GetString(),
+                    Currency = row.Cell(10).GetString(),
+                    UnitPrice = unitPrice,
+                    Packaging = row.Cell(18).GetString(),
+                    AuthorisedDistributor = row.Cell(19).GetString(),
+                    RoHS_REACH = row.Cell(20).GetString(),
+                    Coo = row.Cell(21).GetString()
+                };
+            }
+
+            rows.Add(output);
+        }
+
+        return rows;
+    }
+
     public static void WriteOutput(string inputFilePath, string outputFilePath, List<OutputRow> outputRows)
     {
         File.Copy(inputFilePath, outputFilePath, overwrite: true);
@@ -86,5 +140,42 @@ public static class ExcelProcessor
             if (!dropdownsBefore.Contains(col) || dv == null)
                 Console.WriteLine($"WARNING: Dropdown lost on column {col} in output file");
         }
+    }
+
+    public static void WriteLowestPrice(string outputFilePath, IReadOnlyList<OutputRow> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.Worksheets.Add("Lowest Price");
+        var headers = new[]
+        {
+            "Pn Number", "Description", "Manufacturer", "MPN", "Quantity", "EAU",
+            "Selected Distributor", "Currency", "Unit Price", "Remarks"
+        };
+
+        for (int i = 0; i < headers.Length; i++)
+            ws.Cell(1, i + 1).Value = headers[i];
+
+        ws.Row(1).Style.Font.Bold = true;
+        ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightBlue;
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var excelRow = i + 2;
+            var row = rows[i];
+            var offer = row.ChosenOffer;
+            ws.Cell(excelRow, 1).Value = row.Input.PnNumber;
+            ws.Cell(excelRow, 2).Value = row.Input.Description;
+            ws.Cell(excelRow, 3).Value = row.Input.Mfg;
+            ws.Cell(excelRow, 4).Value = row.Input.Mpn;
+            ws.Cell(excelRow, 5).Value = row.Input.Qty;
+            ws.Cell(excelRow, 6).Value = row.Input.Eau;
+            ws.Cell(excelRow, 7).Value = offer?.Supplier ?? "";
+            ws.Cell(excelRow, 8).Value = offer?.Currency ?? "";
+            if (offer != null) ws.Cell(excelRow, 9).Value = offer.UnitPrice;
+            ws.Cell(excelRow, 10).Value = row.Remarks;
+        }
+
+        ws.Columns().AdjustToContents();
+        wb.SaveAs(outputFilePath);
     }
 }
