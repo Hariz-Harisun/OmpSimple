@@ -220,6 +220,7 @@ public sealed class MouserError
 public sealed class MouserPart
 {
     public string? Availability { get; set; }
+    public string? Description { get; set; }
     public string? LeadTime { get; set; }
     public string? Manufacturer { get; set; }
     public string? ManufacturerPartNumber { get; set; }

@@ -77,7 +77,7 @@ class Program
 
                 var (cleanedMpn, alternates) = MpnCleaner.Clean(row.Mpn);
                 if (string.IsNullOrWhiteSpace(cleanedMpn) ||
-                    (supplierName is not ("DigiKey" or "Element14") && cleanedMpn.StartsWith("SMT;", StringComparison.OrdinalIgnoreCase)))
+                    (supplierName is not ("DigiKey" or "Mouser" or "Element14") && cleanedMpn.StartsWith("SMT;", StringComparison.OrdinalIgnoreCase)))
                 {
                     remarks = "Skipped: not a real MPN";
                     skipped++;

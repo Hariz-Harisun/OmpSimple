@@ -53,9 +53,10 @@ public static class Element14Query
             .Select(product => new
             {
                 Product = product,
+                DisplayName = displayName(product),
                 Score = Score(displayName(product), capacitance, size, voltage, dielectric, tolerance)
             })
-            .Where(item => item.Score >= 4)
+            .Where(item => CapacitanceMatches(item.DisplayName, capacitance) && item.Score >= 4)
             .OrderByDescending(item => item.Score)
             .Select(item => item.Product)
             .FirstOrDefault();
@@ -76,6 +77,8 @@ public static class Element14Query
 
     private static bool CapacitanceMatches(string displayName, string requested)
     {
+        displayName = displayName.Replace('µ', 'u');
+        requested = requested.Replace('µ', 'u');
         var requestedMicrofarads = ParseMicrofarads(requested);
         if (requestedMicrofarads == null)
             return NormalizeToken(displayName).Contains(NormalizeToken(requested), StringComparison.OrdinalIgnoreCase);
@@ -104,7 +107,7 @@ public static class Element14Query
 
     private static decimal? ParseMicrofarads(string value)
     {
-        var match = Regex.Match(value.Trim(), @"(?i)^(\d+(?:[.,]\d+)?)(pF|nF|uF|µF|mF)$");
+        var match = Regex.Match(value.Trim(), @"(?i)^(\d+(?:[.,]\d+)?)\s*(pF|nF|uF|µF|mF)$");
         if (!match.Success) return null;
         var number = decimal.Parse(match.Groups[1].Value.Replace(',', '.'), CultureInfo.InvariantCulture);
         return match.Groups[2].Value.ToLowerInvariant() switch

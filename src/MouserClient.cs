@@ -90,17 +90,25 @@ public sealed class MouserClient : IDisposable, IDistributorClient
 
     public async Task<SupplierSearchResult> SearchAsync(string mpn, CancellationToken ct = default)
     {
-        var result = await SearchRawAsync(mpn, ct);
+        var keywordSearch = Element14Query.IsKeywordSpec(mpn);
+        var searchKeyword = keywordSearch ? Element14Query.Build(mpn) : mpn;
+        var result = await SearchRawAsync(searchKeyword, ct);
         if (IsRateLimitResponse(result.StatusCode, result.ResponseBody))
         {
             Console.WriteLine("Mouser rate limit reached; waiting 60 seconds before retry.");
             await Task.Delay(TimeSpan.FromMinutes(1), ct);
-            result = await SearchRawAsync(mpn, ct);
+            result = await SearchRawAsync(searchKeyword, ct);
         }
 
-        var products = result.Response?.SearchResults?.Parts
+        var sourceProducts = result.Response?.SearchResults?.Parts
             .Select(MouserMapper.ToDigiKeyProduct)
             .ToList() ?? [];
+        var selectedProduct = keywordSearch ? Element14Query.SelectExact(sourceProducts, mpn) : null;
+        if (selectedProduct != null)
+            selectedProduct.ExactKeywordMatch = true;
+        var products = keywordSearch
+            ? selectedProduct == null ? [] : [selectedProduct]
+            : sourceProducts;
 
         return new SupplierSearchResult(
             new DigiKeySearchResponse { Products = products },
@@ -139,6 +147,7 @@ public static class MouserMapper
         {
             Manufacturer = new DigiKeyManufacturer { Name = part.Manufacturer ?? "" },
             ManufacturerProductNumber = part.ManufacturerPartNumber ?? "",
+            ProductDescription = part.Description ?? "",
             ManufacturerLeadWeeks = leadWeeks > 0 ? leadWeeks.ToString(CultureInfo.InvariantCulture) : null,
             ProductVariations =
             [
