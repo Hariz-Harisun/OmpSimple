@@ -176,8 +176,9 @@ class Program
 
             var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
             var baseName = Path.GetFileNameWithoutExtension(file);
-            var jsonPath = Path.Combine("output", $"{baseName}_{timestamp}.json");
-            var xlsxPath = Path.Combine("output", $"{baseName}_{timestamp}.xlsx");
+            var outputName = $"{baseName}_{timestamp}-{supplierName}";
+            var jsonPath = Path.Combine("output", $"{outputName}.json");
+            var xlsxPath = Path.Combine("output", $"{outputName}.xlsx");
 
             // Save JSON first
             var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
