@@ -111,3 +111,7 @@ dotnet test
 - Element14 defaults: 2 calls/second, 1,000 calls/day, 10 results per request; store region comes from `Element14StoreId`
 - API failure logs: `logs/api-failures-<timestamp>.log` (keys excluded)
 - MPN cleaning: first MPN used, alternates in Remarks; brackets removed; Element14 `SMT;...` specifications use keyword search
+- Spec rows (`SMT;size;value;tolerance;...`): a value with an `R`, `k` or `M` suffix (`22R`, `4k7`, `169k`, `1M`) is searched as a resistor (`any:resistor 169kohm 0402 1%`); other values are searched as capacitors (values under 1 nF are written in pF, e.g. `22pF`)
+- Spec matching is strict: the returned part's value (parsed to a number, so `10K` never matches `100K` and `0R` never matches `100R`) and imperial package size must match. Resistors also need the same tolerance and at least the requested power, and resistor arrays are skipped. Capacitors may miss one of voltage, dielectric and tolerance
+- Element14 resistor searches retry once with a second wording (`any:169 kohm resistor 0402`) when the first returns no matching part
+- Element14 REACH: the API has no REACH flag, so `No SVHC` in the SVHC attribute is reported as REACH unaffected; otherwise REACH stays `Not stated` and RoHS/REACH shows `No`
