@@ -36,6 +36,60 @@ public static class ExcelProcessor
         return rows;
     }
 
+    public static List<OutputRow> ReadOutput(string filePath)
+    {
+        var rows = new List<OutputRow>();
+        using var wb = new XLWorkbook(filePath);
+        var ws = wb.Worksheets.FirstOrDefault(w => w.Name == "LT Quote") ?? wb.Worksheets.First();
+        var firstRow = ws.FirstRowUsed();
+        if (firstRow == null) return rows;
+
+        int headerRow = firstRow.RowNumber();
+        int lastRow = ws.LastRowUsed()?.RowNumber() ?? headerRow;
+        for (int r = headerRow + 1; r <= lastRow; r++)
+        {
+            var row = ws.Row(r);
+            if (row.IsEmpty()) continue;
+
+            var output = new OutputRow
+            {
+                Input = new InputRow
+                {
+                    RowNumber = r,
+                    PnNumber = row.Cell(1).GetString(),
+                    Description = row.Cell(2).GetString(),
+                    Mfg = row.Cell(3).GetString(),
+                    Mpn = row.Cell(4).GetString(),
+                    Qty = row.Cell(5).GetString(),
+                    Eau = row.Cell(6).GetString()
+                },
+                Remarks = row.Cell(22).GetString()
+            };
+
+            var supplier = row.Cell(7).GetString();
+            if (!string.IsNullOrWhiteSpace(supplier) &&
+                decimal.TryParse(row.Cell(11).GetString(), out var unitPrice))
+            {
+                output.ChosenOffer = new Offer
+                {
+                    Supplier = supplier,
+                    Mfg = row.Cell(8).GetString(),
+                    Mpn = row.Cell(9).GetString(),
+                    Currency = row.Cell(10).GetString(),
+                    UnitPrice = unitPrice,
+                    Packaging = row.Cell(18).GetString(),
+                    AuthorisedDistributor = row.Cell(19).GetString(),
+                    RoHS_REACH = row.Cell(20).GetString(),
+                    Coo = row.Cell(21).GetString()
+                };
+            }
+
+            rows.Add(output);
+        }
+
+        return rows;
+    }
+
     public static void WriteOutput(string inputFilePath, string outputFilePath, List<OutputRow> outputRows)
     {
         File.Copy(inputFilePath, outputFilePath, overwrite: true);
@@ -86,5 +140,43 @@ public static class ExcelProcessor
             if (!dropdownsBefore.Contains(col) || dv == null)
                 Console.WriteLine($"WARNING: Dropdown lost on column {col} in output file");
         }
+    }
+
+    public static void WriteLowestPrice(
+        string inputFilePath,
+        string outputFilePath,
+        IReadOnlyList<OutputRow> rows)
+    {
+        File.Copy(inputFilePath, outputFilePath, overwrite: true);
+        using var wb = new XLWorkbook(outputFilePath);
+        var ws = wb.Worksheets.FirstOrDefault(w => w.Name == "LT Quote") ?? wb.Worksheets.First();
+
+        foreach (var row in rows)
+        {
+            var excelRow = row.Input.RowNumber;
+            var offer = row.ChosenOffer;
+            if (offer != null)
+            {
+                ws.Cell(excelRow, 7).Value = offer.Supplier;
+                ws.Cell(excelRow, 8).Value = offer.Mfg;
+                ws.Cell(excelRow, 9).Value = offer.Mpn;
+                ws.Cell(excelRow, 10).Value = offer.Currency;
+                ws.Cell(excelRow, 11).Value = offer.UnitPrice;
+                if (offer.Spq.HasValue) ws.Cell(excelRow, 12).Value = offer.Spq.Value;
+                ws.Cell(excelRow, 13).Value = offer.Moq;
+                if (offer.LeadTimeWeeks.HasValue) ws.Cell(excelRow, 14).Value = offer.LeadTimeWeeks.Value;
+                ws.Cell(excelRow, 15).Value = offer.CancellationWeeks;
+                ws.Cell(excelRow, 16).Value = offer.RescheduleWeeks;
+                ws.Cell(excelRow, 17).Value = offer.CxlResDbPb;
+                ws.Cell(excelRow, 18).Value = offer.Packaging;
+                ws.Cell(excelRow, 19).Value = offer.AuthorisedDistributor;
+                ws.Cell(excelRow, 20).Value = offer.RoHS_REACH;
+                ws.Cell(excelRow, 21).Value = offer.Coo;
+            }
+
+            ws.Cell(excelRow, 22).Value = row.Remarks;
+        }
+
+        wb.Save();
     }
 }

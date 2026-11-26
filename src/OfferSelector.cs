@@ -40,7 +40,7 @@ public static class OfferSelector
 
         // MPN match check
         var returnedMpn = product.ManufacturerProductNumber ?? "";
-        if (!MpnMatch(cleanedMpn: originalMpn, returnedMpn))
+        if (!product.ExactKeywordMatch && !MpnMatch(cleanedMpn: originalMpn, returnedMpn))
         {
             return (null, $"Not found (closest: {returnedMpn})");
         }
@@ -120,7 +120,47 @@ public static class OfferSelector
         if (best.CancellationWeeks == 2 && best.RescheduleWeeks == 8 && best.CxlResDbPb == "PB")
             remarks.Add("Terms: default");
 
+        if (string.Equals(supplier, "Mouser", StringComparison.OrdinalIgnoreCase) &&
+            product.ExactKeywordMatch)
+        {
+            var alternateTolerance = GetAlternateTolerance(product.ProductDescription, originalMpn);
+            if (alternateTolerance != null)
+                remarks.Add($"Alternate: {alternateTolerance}% tolerance");
+        }
+
         return (best, string.Join("; ", remarks));
+    }
+
+    private static string? GetAlternateTolerance(string description, string specification)
+    {
+        var fields = specification.Split(';', StringSplitOptions.TrimEntries);
+        if (fields.Length < 5 || !fields[0].Equals("SMT", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var requestedPositive = ParseTolerance(fields[3]);
+        var requestedNegative = ParseTolerance(fields[4]);
+        if (requestedPositive == null || requestedNegative == null || requestedPositive != requestedNegative)
+            return null;
+
+        var candidate = Regex.Match(description, @"(?i)(?:±\s*)?(\d+(?:[.,]\d+)?)\s*%");
+        if (!candidate.Success || !decimal.TryParse(candidate.Groups[1].Value.Replace(',', '.'),
+                System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var candidateTolerance) || candidateTolerance == requestedPositive)
+            return null;
+
+        return candidateTolerance.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static decimal? ParseTolerance(string value)
+    {
+        var match = Regex.Match(value, @"(?i)(?:\+|-)?\s*(\d+(?:[.,]\d+)?)\s*%");
+        return match.Success && decimal.TryParse(match.Groups[1].Value.Replace(',', '.'),
+            System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var tolerance)
+            ? tolerance
+            : null;
     }
 
     private static bool MpnMatch(string cleanedMpn, string returnedMpn)
@@ -313,6 +353,7 @@ public static class OfferSelector
             Supplier = supplier,
             Mfg = product.Manufacturer?.Name ?? "",
             Mpn = product.ManufacturerProductNumber,
+            Currency = product.Currency,
             UnitPrice = price,
             Spq = spq,
             Moq = moq,

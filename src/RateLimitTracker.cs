@@ -13,6 +13,7 @@ public sealed class DistributorRateTracker
     private const int DisplayBarWidth = 20;
     private readonly string _statePath;
     private readonly Dictionary<string, RateState> _states;
+    private readonly object _stateGate = new();
 
     private DistributorRateTracker(string statePath, Dictionary<string, RateState> states)
     {
@@ -27,6 +28,7 @@ public sealed class DistributorRateTracker
 
         AddDefaultIfMissing(states, "DigiKey", perMinuteLimit: 30, dailyLimit: 1000, batchSize: 50);
         AddDefaultIfMissing(states, "Mouser", perMinuteLimit: 30, dailyLimit: 1000, batchSize: 50);
+        AddDefaultIfMissing(states, "Element14", perMinuteLimit: 2, dailyLimit: 1000, batchSize: 10);
         return new DistributorRateTracker(statePath, states);
     }
 
@@ -45,7 +47,7 @@ public sealed class DistributorRateTracker
         var percentage = state.DailyLimit == 0 ? 0 : remaining * 100d / state.DailyLimit;
         var filled = (int)Math.Round(percentage / 100d * DisplayBarWidth, MidpointRounding.AwayFromZero);
         var bar = new string('#', filled) + new string('-', DisplayBarWidth - filled);
-        return $" [{bar}] {percentage:0.0}% ({remaining} / {state.DailyLimit})";
+        return $"Remaining [{bar}] {percentage:0.0}% ({remaining} / {state.DailyLimit})";
     }
 
     public void RecordCalls(string distributor, int calls)
@@ -53,10 +55,13 @@ public sealed class DistributorRateTracker
         if (calls < 0)
             throw new ArgumentOutOfRangeException(nameof(calls));
 
-        var state = GetState(distributor);
-        ResetIfNewDay(state);
-        state.CallsUsed = Math.Min(state.DailyLimit, state.CallsUsed + calls);
-        Save();
+        lock (_stateGate)
+        {
+            var state = GetState(distributor);
+            ResetIfNewDay(state);
+            state.CallsUsed = Math.Min(state.DailyLimit, state.CallsUsed + calls);
+            Save();
+        }
     }
 
     private RateState GetState(string distributor)

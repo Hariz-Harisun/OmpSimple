@@ -90,17 +90,25 @@ public sealed class MouserClient : IDisposable, IDistributorClient
 
     public async Task<SupplierSearchResult> SearchAsync(string mpn, CancellationToken ct = default)
     {
-        var result = await SearchRawAsync(mpn, ct);
+        var keywordSearch = Element14Query.IsKeywordSpec(mpn);
+        var searchKeyword = keywordSearch ? Element14Query.Build(mpn) : mpn;
+        var result = await SearchRawAsync(searchKeyword, ct);
         if (IsRateLimitResponse(result.StatusCode, result.ResponseBody))
         {
             Console.WriteLine("Mouser rate limit reached; waiting 60 seconds before retry.");
             await Task.Delay(TimeSpan.FromMinutes(1), ct);
-            result = await SearchRawAsync(mpn, ct);
+            result = await SearchRawAsync(searchKeyword, ct);
         }
 
-        var products = result.Response?.SearchResults?.Parts
+        var sourceProducts = result.Response?.SearchResults?.Parts
             .Select(MouserMapper.ToDigiKeyProduct)
             .ToList() ?? [];
+        var selectedProduct = keywordSearch ? Element14Query.SelectExact(sourceProducts, mpn) : null;
+        if (selectedProduct != null)
+            selectedProduct.ExactKeywordMatch = true;
+        var products = keywordSearch
+            ? selectedProduct == null ? [] : [selectedProduct]
+            : sourceProducts;
 
         return new SupplierSearchResult(
             new DigiKeySearchResponse { Products = products },
@@ -139,6 +147,7 @@ public static class MouserMapper
         {
             Manufacturer = new DigiKeyManufacturer { Name = part.Manufacturer ?? "" },
             ManufacturerProductNumber = part.ManufacturerPartNumber ?? "",
+            ProductDescription = part.Description ?? "",
             ManufacturerLeadWeeks = leadWeeks > 0 ? leadWeeks.ToString(CultureInfo.InvariantCulture) : null,
             ProductVariations =
             [
@@ -240,7 +249,16 @@ public static class DistributorFactory
         {
             "1" => ("DigiKey", new DigiKeyDistributorClient(http, rateTracker)),
             "2" => ("Mouser", new MouserClient(http, Credentials.MouserApiKey, rateTracker)),
-            _ => throw new ArgumentException("Choose 1 for DigiKey or 2 for Mouser.", nameof(choice))
+            "3" => ("Element14", new Element14Client(http, Credentials.Element14ApiKey, Credentials.Element14StoreId, rateTracker)),
+            _ => throw new ArgumentException("Choose 1 for DigiKey, 2 for Mouser, or 3 for Element14.", nameof(choice))
         };
     }
+
+    public static string CreateName(string choice) => choice switch
+    {
+        "1" => "DigiKey",
+        "2" => "Mouser",
+        "3" => "Element14",
+        _ => throw new ArgumentException("Unknown distributor choice.", nameof(choice))
+    };
 }

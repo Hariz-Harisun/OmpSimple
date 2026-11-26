@@ -1,6 +1,36 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace OmpSimple.Models;
+
+public sealed class StringOrObjectConverter : JsonConverter<string>
+{
+    public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String)
+            return reader.GetString() ?? "";
+
+        if (reader.TokenType == JsonTokenType.StartObject)
+        {
+            using var document = JsonDocument.ParseValue(ref reader);
+            var values = new List<string>();
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String)
+                    values.Add(property.Value.GetString() ?? "");
+            }
+            return string.Join("; ", values.Where(value => !string.IsNullOrWhiteSpace(value)));
+        }
+
+        if (reader.TokenType == JsonTokenType.Null)
+            return "";
+
+        throw new JsonException($"Expected string or object, got {reader.TokenType}.");
+    }
+
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value);
+}
 
 public sealed class InputRow
 {
@@ -64,11 +94,21 @@ public sealed class DigiKeySearchResponse
 
 public sealed class DigiKeyProduct
 {
+    [JsonIgnore]
+    public string Currency { get; set; } = "USD";
+
+    [JsonIgnore]
+    public bool ExactKeywordMatch { get; set; }
+
     [JsonPropertyName("Manufacturer")]
     public DigiKeyManufacturer? Manufacturer { get; set; }
 
     [JsonPropertyName("ManufacturerProductNumber")]
     public string ManufacturerProductNumber { get; set; } = "";
+
+    [JsonPropertyName("Description")]
+    [JsonConverter(typeof(StringOrObjectConverter))]
+    public string ProductDescription { get; set; } = "";
 
     [JsonPropertyName("ManufacturerLeadWeeks")]
     public string? ManufacturerLeadWeeks { get; set; }
@@ -180,6 +220,7 @@ public sealed class MouserError
 public sealed class MouserPart
 {
     public string? Availability { get; set; }
+    public string? Description { get; set; }
     public string? LeadTime { get; set; }
     public string? Manufacturer { get; set; }
     public string? ManufacturerPartNumber { get; set; }

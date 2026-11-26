@@ -78,6 +78,104 @@ public class MouserTests
     }
 
     [Fact]
+    public void MouserMapper_MapsDescriptionForSpecificationMatching()
+    {
+        var product = MouserMapper.ToDigiKeyProduct(new MouserPart
+        {
+            Manufacturer = "Test Mfg",
+            ManufacturerPartNumber = "TEST-123",
+            Description = "2.2 µF, 10 V, 0603, ±10%, X5R"
+        });
+
+        Assert.Equal("2.2 µF, 10 V, 0603, ±10%, X5R", product.ProductDescription);
+        var selected = Element14Query.SelectExact(
+            [
+                MouserMapper.ToDigiKeyProduct(new MouserPart
+                {
+                    ManufacturerPartNumber = "OTHER-1U",
+                    Description = "1 µF, 10 V, 0603, X5R"
+                }),
+                product
+            ],
+            "SMT;SMD0603;2u2;+10%;-10%;10V;X5R");
+        Assert.Same(product, selected);
+    }
+
+    [Fact]
+    public async Task MouserClient_UsesNormalizedKeywordAndSelectsExactSpecification()
+    {
+        string? requestBody = null;
+        var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+            {"Errors":[],"SearchResults":{"NumberOfResult":2,"Parts":[
+              {"Manufacturer":"Other","ManufacturerPartNumber":"OTHER-1U","Description":"1 µF, 10 V, 0603, X5R","Min":"1","AvailabilityInStock":"100","PriceBreaks":[{"Quantity":1,"RawPrice":0.05,"Currency":"USD"}]},
+              {"Manufacturer":"Test Mfg","ManufacturerPartNumber":"TEST-2U2","Description":"2.2 µF, 10 V, 0603 [1608 Metric], ± 10%, X5R","Min":"1","AvailabilityInStock":"100","PriceBreaks":[{"Quantity":1,"RawPrice":0.12,"Currency":"USD"}]}
+            ]}}
+            """, Encoding.UTF8, "application/json")
+        }, body => requestBody = body);
+        using var http = new HttpClient(handler);
+        using var client = new MouserClient(http, "test-api-key");
+
+        var (response, status, _, _, _) = await client.SearchAsync("SMT;SMD0603;2u2;+10%;-10%;10V;X5R");
+
+        Assert.Equal(200, status);
+        Assert.NotNull(response);
+        Assert.Single(response!.Products);
+        Assert.Contains("2.2", response.Products[0].ProductDescription);
+        Assert.Equal("TEST-2U2", response.Products[0].ManufacturerProductNumber);
+        Assert.True(response.Products[0].ExactKeywordMatch);
+        Assert.Contains("any:2.2uF 0603 10V X5R", requestBody);
+    }
+
+    [Fact]
+    public void MouserStructuredSearch_AddsAlternateToleranceRemark()
+    {
+        var product = MouserMapper.ToDigiKeyProduct(new MouserPart
+        {
+            Manufacturer = "TAIYO YUDEN",
+            ManufacturerPartNumber = "MCASE105AB5474MFNA01",
+            Description = "470 nF, 16 V, 0402, ±20%, X5R",
+            Min = "1",
+            AvailabilityInStock = "10000",
+            PriceBreaks = [new MouserPriceBreak { Quantity = 1, RawPrice = 0.19m, Currency = "USD" }]
+        });
+        product.ExactKeywordMatch = true;
+
+        var (offer, remarks) = OfferSelector.SelectBest(
+            product,
+            4,
+            "SMT;SMD0402;470n;+10%;-10%;16V;X5R",
+            supplier: "Mouser");
+
+        Assert.NotNull(offer);
+        Assert.Contains("Alternate: 20% tolerance", remarks);
+    }
+
+    [Fact]
+    public void MouserStructuredSearch_DoesNotRemarkOnRequestedTolerance()
+    {
+        var product = MouserMapper.ToDigiKeyProduct(new MouserPart
+        {
+            ManufacturerPartNumber = "TEST-470N",
+            Description = "470 nF, 16 V, 0402, ±10%, X5R",
+            Min = "1",
+            AvailabilityInStock = "10000",
+            PriceBreaks = [new MouserPriceBreak { Quantity = 1, RawPrice = 0.20m, Currency = "USD" }]
+        });
+        product.ExactKeywordMatch = true;
+
+        var (offer, remarks) = OfferSelector.SelectBest(
+            product,
+            4,
+            "SMT;SMD0402;470n;+10%;-10%;16V;X5R",
+            supplier: "Mouser");
+
+        Assert.NotNull(offer);
+        Assert.DoesNotContain("Alternate:", remarks);
+    }
+
+    [Fact]
     public async Task MouserClient_PostsExpectedRequestAndParsesResponse()
     {
         string? requestBody = null;

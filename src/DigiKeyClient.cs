@@ -50,9 +50,11 @@ public sealed class DigiKeyClient : IDisposable
         if (string.IsNullOrEmpty(token))
             return (null, tokenStatusCode == 200 ? 401 : tokenStatusCode, null, null, tokenResponseBody);
 
+        var keywordSearch = Element14Query.IsKeywordSpec(mpn);
+        var keywords = keywordSearch ? Element14Query.Build(mpn) : mpn;
         var request = new HttpRequestMessage(HttpMethod.Post, "products/v4/search/keyword")
         {
-            Content = JsonContent.Create(new { Keywords = mpn, Limit = 10, Offset = 0 })
+            Content = JsonContent.Create(new { Keywords = keywords, Limit = 10, Offset = 0 })
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Add("X-DIGIKEY-Client-Id", Credentials.ClientId);
@@ -71,8 +73,22 @@ public sealed class DigiKeyClient : IDisposable
         if (!resp.IsSuccessStatusCode)
             return (null, (int)resp.StatusCode, rateLimitLimit, rateLimitRemaining, responseBody);
 
-        return (JsonSerializer.Deserialize<DigiKeySearchResponse>(responseBody, _jsonOptions),
-            (int)resp.StatusCode, rateLimitLimit, rateLimitRemaining, responseBody);
+        var response = JsonSerializer.Deserialize<DigiKeySearchResponse>(responseBody, _jsonOptions);
+        if (keywordSearch && response?.Products is { Count: > 0 })
+        {
+            var selected = Element14Query.SelectExact(response.Products, mpn);
+            if (selected == null)
+            {
+                response.Products = [];
+            }
+            else
+            {
+                selected.ExactKeywordMatch = true;
+                response.Products = [selected];
+            }
+        }
+
+        return (response, (int)resp.StatusCode, rateLimitLimit, rateLimitRemaining, responseBody);
     }
 
     public void Dispose() => _http.Dispose();
