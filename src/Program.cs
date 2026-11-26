@@ -23,9 +23,12 @@ class Program
       
     """;
 
+    private static int ScreenStartRow;
+
     static async Task Main()
     {
         Console.WriteLine(Banner);
+        ScreenStartRow = Console.CursorTop + 1;
         Directory.CreateDirectory("input");
         Directory.CreateDirectory("output");
         Directory.CreateDirectory("logs");
@@ -35,13 +38,40 @@ class Program
         {
             var choice = PromptForDistributor(rateTracker);
             if (choice == null) return;
-            if (choice == "4")
-            {
-                RunLowestPriceSelection();
-                continue;
-            }
 
+            await RunChoiceAsync(choice, rateTracker);
+        }
+    }
+
+    private static async Task RunChoiceAsync(string choice, DistributorRateTracker rateTracker)
+    {
+        ClearScreenBelowHeader();
+
+        if (choice == "4")
+            await RunLowestPriceSelectionAsync(rateTracker);
+        else
             await ProcessDistributorAsync(choice, rateTracker);
+
+        Console.WriteLine("Press Enter to continue...");
+        Console.ReadLine();
+        ClearScreenBelowHeader();
+    }
+
+    private static void ClearScreenBelowHeader()
+    {
+        try
+        {
+            Console.Clear();
+            Console.WriteLine(Banner);
+            ScreenStartRow = Console.CursorTop + 1;
+        }
+        catch (IOException)
+        {
+            // The console can disappear while changing screens.
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            // The console can resize between screen transitions.
         }
     }
 
@@ -278,78 +308,112 @@ class Program
         return choice;
     }
 
-    private static bool RunLowestPriceSelection()
+    private static async Task RunLowestPriceSelectionAsync(DistributorRateTracker rateTracker)
     {
-        Console.Write("Enter quotation_id: ");
-        var quotationId = Console.ReadLine()?.Trim();
-        if (string.IsNullOrWhiteSpace(quotationId))
+        var inputFile = Directory.GetFiles("input", "*.xlsx")
+            .OrderByDescending(File.GetLastWriteTime)
+            .FirstOrDefault();
+        if (inputFile == null)
         {
-            Console.WriteLine("Quotation ID is required. Returning to menu.");
-            return false;
+            Console.WriteLine("No .xlsx files in input/. Returning to menu.");
+            return;
         }
 
-        var selectedFiles = Directory.GetFiles("output", $"{quotationId}_*.xlsx")
-            .Select(path => new { Path = path, Name = Path.GetFileNameWithoutExtension(path) })
-            .Select(file =>
-            {
-                foreach (var supplier in new[] { "DigiKey", "Mouser", "Element14" })
-                {
-                    var suffix = $"-{supplier}";
-                    if (!file.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) continue;
-                    var timestampText = file.Name[(quotationId.Length + 1)..^suffix.Length];
-                    if (DateTime.TryParseExact(timestampText, "yyyyMMdd-HHmmss", null, System.Globalization.DateTimeStyles.None, out var timestamp))
-                        return new { file.Path, Supplier = supplier, Timestamp = timestamp };
-                }
-
-                return null;
-            })
-            .Where(file => file != null)
-            .GroupBy(file => file!.Supplier, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.OrderByDescending(file => file!.Timestamp).First()!)
-            .OrderBy(file => Array.IndexOf(new[] { "DigiKey", "Mouser", "Element14" }, file.Supplier))
-            .ToList();
-
-        if (selectedFiles.Count == 0)
+        var inputRows = ExcelProcessor.ReadInput(inputFile);
+        if (inputRows.Count == 0)
         {
-            Console.WriteLine($"No distributor files found for quotation_id '{quotationId}'. Returning to menu.");
-            return false;
+            Console.WriteLine("Input workbook has no quote rows. Returning to menu.");
+            return;
         }
 
-        var distributorRows = new List<IReadOnlyList<OutputRow>>();
-        foreach (var file in selectedFiles)
+        Console.WriteLine($"Processing lowest price in parallel: {inputFile}");
+        var distributorChoices = new[] { "1", "2", "3" };
+        using var progress = LowestPriceProgress.Start(["DigiKey", "Mouser", "Element14"]);
+        var distributorTasks = distributorChoices.Select(async choice =>
         {
-            var jsonPath = Path.ChangeExtension(file.Path, ".json");
-            List<OutputRow> rows;
-            if (File.Exists(jsonPath))
+            var distributorName = DistributorFactory.CreateName(choice);
+            try
             {
-                rows = JsonSerializer.Deserialize<List<OutputRow>>(File.ReadAllText(jsonPath)) ?? [];
+                return (Rows: await QueryDistributorAsync(choice, inputRows, rateTracker, progress), Error: (string?)null);
+            }
+            catch (Exception ex)
+            {
+                progress.Finished(distributorName, 0);
+                return (Rows: new List<OutputRow>(), Error: $"  {distributorName} failed: {ex.Message}");
+            }
+        }).ToArray();
+
+        var distributorResults = await Task.WhenAll(distributorTasks);
+        progress.Dispose();
+        foreach (var error in distributorResults.Select(result => result.Error).Where(error => error != null))
+            Console.WriteLine(error);
+
+        var distributorRows = distributorResults.Select(result => result.Rows).ToArray();
+        var lowestRows = LowestPriceSelector.Select(distributorRows);
+        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var baseName = Path.GetFileNameWithoutExtension(inputFile);
+        var outputPath = Path.Combine("output", $"{baseName}_lowest_price_{timestamp}.xlsx");
+        ExcelProcessor.WriteLowestPrice(inputFile, outputPath, lowestRows);
+        Console.WriteLine($"Lowest price Excel saved: {outputPath}");
+    }
+
+    private static async Task<List<OutputRow>> QueryDistributorAsync(
+        string choice,
+        IReadOnlyList<InputRow> inputRows,
+        DistributorRateTracker rateTracker,
+        LowestPriceProgress progress)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var distributorClient = DistributorFactory.Create(choice, http, rateTracker);
+        using var client = distributorClient.Client;
+        var supplierName = distributorClient.Name;
+        var mpnCache = new Dictionary<string, SupplierSearchResult>();
+        var outputRows = new List<OutputRow>();
+
+        foreach (var row in inputRows)
+        {
+            var outputRow = new OutputRow { Input = row };
+            var (cleanedMpn, alternates) = MpnCleaner.Clean(row.Mpn);
+            var remarks = "";
+
+            if (string.IsNullOrWhiteSpace(cleanedMpn))
+            {
+                remarks = "Skipped: not a real MPN";
             }
             else
             {
-                rows = ExcelProcessor.ReadOutput(file.Path);
+                if (!mpnCache.TryGetValue(cleanedMpn, out var result))
+                {
+                    result = await client.SearchAsync(cleanedMpn);
+                    mpnCache[cleanedMpn] = result;
+                    await Task.Delay(600);
+                }
+
+                if (result.StatusCode is 401 or 403 or 429)
+                {
+                    remarks = $"HTTP {result.StatusCode}";
+                }
+                else if (result.Response?.Products.Count > 0)
+                {
+                    var qty = int.TryParse(row.Qty, out var parsedQty) ? parsedQty : 0;
+                    var (offer, offerRemarks) = OfferSelector.SelectBest(
+                        result.Response.Products, qty, cleanedMpn, row.Mfg, supplierName);
+                    outputRow.ChosenOffer = offer;
+                    remarks = offer == null ? offerRemarks : offerRemarks;
+                }
+                else
+                {
+                    remarks = result.StatusCode is 200 or 404 ? "Not found" : $"HTTP {result.StatusCode}";
+                }
             }
 
-            if (rows.Count == 0)
-            {
-                Console.WriteLine($"  Skipping {file.Supplier}: no readable rows");
-                continue;
-            }
-
-            distributorRows.Add(rows);
-            Console.WriteLine($"  Using {file.Supplier}: {file.Path}");
+            if (!string.IsNullOrEmpty(alternates))
+                remarks = (remarks + "; Alternates: " + alternates).TrimStart(';', ' ');
+            outputRow.Remarks = remarks;
+            outputRows.Add(outputRow);
         }
 
-        if (distributorRows.Count == 0)
-        {
-            Console.WriteLine("No readable distributor data found. Returning to menu.");
-            return false;
-        }
-
-        var lowestRows = LowestPriceSelector.Select(distributorRows);
-        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-        var outputPath = Path.Combine("output", $"{quotationId}_lowest_price_{timestamp}.xlsx");
-        ExcelProcessor.WriteLowestPrice(outputPath, lowestRows);
-        Console.WriteLine($"Lowest price Excel saved: {outputPath}");
-        return true;
+        progress.Finished(supplierName, outputRows.Count);
+        return outputRows;
     }
 }

@@ -13,6 +13,7 @@ public sealed class DistributorRateTracker
     private const int DisplayBarWidth = 20;
     private readonly string _statePath;
     private readonly Dictionary<string, RateState> _states;
+    private readonly object _stateGate = new();
 
     private DistributorRateTracker(string statePath, Dictionary<string, RateState> states)
     {
@@ -54,10 +55,13 @@ public sealed class DistributorRateTracker
         if (calls < 0)
             throw new ArgumentOutOfRangeException(nameof(calls));
 
-        var state = GetState(distributor);
-        ResetIfNewDay(state);
-        state.CallsUsed = Math.Min(state.DailyLimit, state.CallsUsed + calls);
-        Save();
+        lock (_stateGate)
+        {
+            var state = GetState(distributor);
+            ResetIfNewDay(state);
+            state.CallsUsed = Math.Min(state.DailyLimit, state.CallsUsed + calls);
+            Save();
+        }
     }
 
     private RateState GetState(string distributor)

@@ -14,12 +14,14 @@ public class LowestPriceSelectorTests
         var digiKey = new OutputRow
         {
             Input = input,
-            ChosenOffer = new Offer { Supplier = "DigiKey", Currency = "USD", UnitPrice = 1.00m }
+            ChosenOffer = new Offer { Supplier = "DigiKey", Currency = "USD", UnitPrice = 1.00m },
+            Remarks = "DigiKey individual remark"
         };
         var mouser = new OutputRow
         {
             Input = input,
-            ChosenOffer = new Offer { Supplier = "Mouser", Currency = "USD", UnitPrice = 1.00m }
+            ChosenOffer = new Offer { Supplier = "Mouser", Currency = "USD", UnitPrice = 1.00m },
+            Remarks = "Mouser individual remark"
         };
         var element14 = new OutputRow
         {
@@ -34,6 +36,30 @@ public class LowestPriceSelectorTests
         var selectedOffer = selected[0].ChosenOffer!;
         Assert.Equal("DigiKey", selectedOffer.Supplier);
         Assert.Equal(1.00m, selectedOffer.UnitPrice);
+        Assert.Equal("DigiKey individual remark", selected[0].Remarks);
+    }
+
+    [Fact]
+    public void Select_UsesIndividualRemarkFromLowestOffer()
+    {
+        var input = new InputRow { RowNumber = 2, Mpn = "TEST" };
+        var digiKey = new OutputRow
+        {
+            Input = input,
+            ChosenOffer = new Offer { Supplier = "DigiKey", UnitPrice = 2.00m },
+            Remarks = "DigiKey remark"
+        };
+        var mouser = new OutputRow
+        {
+            Input = input,
+            ChosenOffer = new Offer { Supplier = "Mouser", UnitPrice = 1.00m },
+            Remarks = "Mouser remark"
+        };
+
+        var selected = LowestPriceSelector.Select([[digiKey], [mouser]]);
+
+        Assert.Equal("Mouser", selected[0].ChosenOffer!.Supplier);
+        Assert.Equal("Mouser remark", selected[0].Remarks);
     }
 
     [Fact]
@@ -679,6 +705,69 @@ public class ColumnDefaultsTests
         Assert.Equal(8, offer.RescheduleWeeks);
         Assert.Equal("PB", offer.CxlResDbPb);
         Assert.Equal("Yes", offer.AuthorisedDistributor);
+    }
+}
+
+public class LowestPriceWorkbookTests
+{
+    [Fact]
+    public void WriteLowestPrice_PreservesInputWorkbookFormat()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "OmpSimpleLowestPrice_" + Guid.NewGuid());
+        Directory.CreateDirectory(tempDir);
+        var inputFile = Path.Combine(tempDir, "quote.xlsx");
+        var outputFile = Path.Combine(tempDir, "lowest.xlsx");
+
+        try
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var quote = workbook.AddWorksheet("LT Quote");
+                quote.Cell(1, 1).Value = "PN#";
+                quote.Cell(1, 7).Value = "Supplier";
+                quote.Cell(2, 1).Value = "PN-1";
+                quote.Cell(2, 4).Value = "MPN-1";
+                quote.Cell(2, 5).Value = "10";
+                quote.Cell(2, 7).Value = "Input value";
+                quote.Cell(2, 22).Value = "Input remark";
+                quote.Cell(1, 1).Style.Font.Bold = true;
+                workbook.AddWorksheet("Sheet1").Cell(1, 1).Value = "Countries";
+                workbook.SaveAs(inputFile);
+            }
+
+            var rows = new List<OutputRow>
+            {
+                new()
+                {
+                    Input = new InputRow { RowNumber = 2, PnNumber = "PN-1", Mpn = "MPN-1", Qty = "10" },
+                    ChosenOffer = new Offer
+                    {
+                        Supplier = "Mouser",
+                        Mfg = "Maker",
+                        Mpn = "MPN-1",
+                        Currency = "USD",
+                        UnitPrice = 1.23m
+                    },
+                    Remarks = "Mouser individual remark"
+                }
+            };
+
+            ExcelProcessor.WriteLowestPrice(inputFile, outputFile, rows);
+
+            using var result = new XLWorkbook(outputFile);
+            Assert.Equal(new[] { "LT Quote", "Sheet1" }, result.Worksheets.Select(sheet => sheet.Name));
+            var quoteSheet = result.Worksheet("LT Quote");
+            Assert.Equal("PN#", quoteSheet.Cell(1, 1).GetString());
+            Assert.True(quoteSheet.Cell(1, 1).Style.Font.Bold);
+            Assert.Equal("Mouser", quoteSheet.Cell(2, 7).GetString());
+            Assert.Equal(1.23m, quoteSheet.Cell(2, 11).GetValue<decimal>());
+            Assert.Equal("Mouser individual remark", quoteSheet.Cell(2, 22).GetString());
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+                Directory.Delete(tempDir, recursive: true);
+        }
     }
 }
 

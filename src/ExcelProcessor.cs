@@ -142,40 +142,41 @@ public static class ExcelProcessor
         }
     }
 
-    public static void WriteLowestPrice(string outputFilePath, IReadOnlyList<OutputRow> rows)
+    public static void WriteLowestPrice(
+        string inputFilePath,
+        string outputFilePath,
+        IReadOnlyList<OutputRow> rows)
     {
-        using var wb = new XLWorkbook();
-        var ws = wb.Worksheets.Add("Lowest Price");
-        var headers = new[]
+        File.Copy(inputFilePath, outputFilePath, overwrite: true);
+        using var wb = new XLWorkbook(outputFilePath);
+        var ws = wb.Worksheets.FirstOrDefault(w => w.Name == "LT Quote") ?? wb.Worksheets.First();
+
+        foreach (var row in rows)
         {
-            "Pn Number", "Description", "Manufacturer", "MPN", "Quantity", "EAU",
-            "Selected Distributor", "Currency", "Unit Price", "Remarks"
-        };
-
-        for (int i = 0; i < headers.Length; i++)
-            ws.Cell(1, i + 1).Value = headers[i];
-
-        ws.Row(1).Style.Font.Bold = true;
-        ws.Row(1).Style.Fill.BackgroundColor = XLColor.LightBlue;
-
-        for (int i = 0; i < rows.Count; i++)
-        {
-            var excelRow = i + 2;
-            var row = rows[i];
+            var excelRow = row.Input.RowNumber;
             var offer = row.ChosenOffer;
-            ws.Cell(excelRow, 1).Value = row.Input.PnNumber;
-            ws.Cell(excelRow, 2).Value = row.Input.Description;
-            ws.Cell(excelRow, 3).Value = row.Input.Mfg;
-            ws.Cell(excelRow, 4).Value = row.Input.Mpn;
-            ws.Cell(excelRow, 5).Value = row.Input.Qty;
-            ws.Cell(excelRow, 6).Value = row.Input.Eau;
-            ws.Cell(excelRow, 7).Value = offer?.Supplier ?? "";
-            ws.Cell(excelRow, 8).Value = offer?.Currency ?? "";
-            if (offer != null) ws.Cell(excelRow, 9).Value = offer.UnitPrice;
-            ws.Cell(excelRow, 10).Value = row.Remarks;
+            if (offer != null)
+            {
+                ws.Cell(excelRow, 7).Value = offer.Supplier;
+                ws.Cell(excelRow, 8).Value = offer.Mfg;
+                ws.Cell(excelRow, 9).Value = offer.Mpn;
+                ws.Cell(excelRow, 10).Value = offer.Currency;
+                ws.Cell(excelRow, 11).Value = offer.UnitPrice;
+                if (offer.Spq.HasValue) ws.Cell(excelRow, 12).Value = offer.Spq.Value;
+                ws.Cell(excelRow, 13).Value = offer.Moq;
+                if (offer.LeadTimeWeeks.HasValue) ws.Cell(excelRow, 14).Value = offer.LeadTimeWeeks.Value;
+                ws.Cell(excelRow, 15).Value = offer.CancellationWeeks;
+                ws.Cell(excelRow, 16).Value = offer.RescheduleWeeks;
+                ws.Cell(excelRow, 17).Value = offer.CxlResDbPb;
+                ws.Cell(excelRow, 18).Value = offer.Packaging;
+                ws.Cell(excelRow, 19).Value = offer.AuthorisedDistributor;
+                ws.Cell(excelRow, 20).Value = offer.RoHS_REACH;
+                ws.Cell(excelRow, 21).Value = offer.Coo;
+            }
+
+            ws.Cell(excelRow, 22).Value = row.Remarks;
         }
 
-        ws.Columns().AdjustToContents();
-        wb.SaveAs(outputFilePath);
+        wb.Save();
     }
 }

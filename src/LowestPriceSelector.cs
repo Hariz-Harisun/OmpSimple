@@ -45,7 +45,7 @@ public static class LowestPriceSelector
             {
                 Input = first.Input,
                 ChosenOffer = lowest,
-                Remarks = $"Lowest price selected: {lowest.Supplier}"
+                Remarks = candidates.First(row => ReferenceEquals(row.ChosenOffer, lowest)).Remarks
             });
         }
 
