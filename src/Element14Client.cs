@@ -29,10 +29,46 @@ public sealed class Element14Client : IDisposable, IDistributorClient
 
     public async Task<SupplierSearchResult> SearchAsync(string mpn, CancellationToken ct = default)
     {
-        await WaitForRateLimitAsync(ct);
-
         var keywordSearch = Element14Query.IsKeywordSpec(mpn);
-        var searchTerm = keywordSearch ? Element14Query.Build(mpn) : $"manuPartNum:{mpn}";
+        IReadOnlyList<string> searchTerms = keywordSearch
+            ? Element14Query.BuildVariants(mpn)
+            : [$"manuPartNum:{mpn}"];
+
+        SupplierSearchResult? last = null;
+        for (var attempt = 0; attempt < searchTerms.Count; attempt++)
+        {
+            await WaitForRateLimitAsync(ct);
+            var (statusCode, responseBody, payload) = await SendAsync(searchTerms[attempt], ct);
+
+            if (statusCode is < 200 or >= 300)
+                return new SupplierSearchResult(null, statusCode, null, null, responseBody);
+
+            var searchReturn = payload?.ManufacturerPartNumberSearchReturn ?? payload?.KeywordSearchReturn;
+            var currency = searchReturn?.Currency ?? "MYR";
+            var sourceProducts = searchReturn?.Products ?? [];
+            var selectedProduct = keywordSearch ? Element14Query.SelectExact(sourceProducts, mpn) : null;
+            var products = keywordSearch
+                ? selectedProduct == null ? [] : [Element14Mapper.ToDigiKeyProduct(selectedProduct, currency, exactKeywordMatch: true)]
+                : sourceProducts.Select(product => Element14Mapper.ToDigiKeyProduct(product, currency)).ToList();
+
+            last = new SupplierSearchResult(
+                new DigiKeySearchResponse { Products = products },
+                statusCode,
+                null,
+                null,
+                responseBody);
+
+            // Keyword searches try the next wording only when nothing matched the specification.
+            if (!keywordSearch || products.Count > 0)
+                break;
+        }
+
+        return last!;
+    }
+
+    private async Task<(int StatusCode, string Body, Element14SearchResponse? Payload)> SendAsync(
+        string searchTerm, CancellationToken ct)
+    {
         var query = new Dictionary<string, string>
         {
             ["term"] = searchTerm,
@@ -49,7 +85,7 @@ public sealed class Element14Client : IDisposable, IDistributorClient
         var responseBody = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
-            return new SupplierSearchResult(null, (int)response.StatusCode, null, null, responseBody);
+            return ((int)response.StatusCode, responseBody, null);
 
         Element14SearchResponse? payload;
         try
@@ -61,20 +97,7 @@ public sealed class Element14Client : IDisposable, IDistributorClient
             payload = null;
         }
 
-        var searchReturn = payload?.ManufacturerPartNumberSearchReturn ?? payload?.KeywordSearchReturn;
-        var currency = searchReturn?.Currency ?? "MYR";
-        var sourceProducts = searchReturn?.Products ?? [];
-        var selectedProduct = keywordSearch ? Element14Query.SelectExact(sourceProducts, mpn) : null;
-        var products = keywordSearch
-            ? selectedProduct == null ? [] : [Element14Mapper.ToDigiKeyProduct(selectedProduct, currency, exactKeywordMatch: true)]
-            : sourceProducts.Select(product => Element14Mapper.ToDigiKeyProduct(product, currency)).ToList();
-
-        return new SupplierSearchResult(
-            new DigiKeySearchResponse { Products = products },
-            (int)response.StatusCode,
-            null,
-            null,
-            responseBody);
+        return ((int)response.StatusCode, responseBody, payload);
     }
 
     private async Task WaitForRateLimitAsync(CancellationToken ct)
@@ -121,6 +144,7 @@ public static class Element14Mapper
             ExactKeywordMatch = exactKeywordMatch,
             Manufacturer = new DigiKeyManufacturer { Name = product.BrandName ?? "" },
             ManufacturerProductNumber = product.TranslatedManufacturerPartNumber ?? "",
+            ProductDescription = product.DisplayName ?? "",
             ManufacturerLeadWeeks = leadWeeks > 0 ? leadWeeks.ToString(CultureInfo.InvariantCulture) : null,
             ProductVariations =
             [
@@ -142,10 +166,22 @@ public static class Element14Mapper
             Classifications = new DigiKeyClassifications
             {
                 RohsStatus = product.RohsStatusCode == "YES" ? "RoHS Compliant" : product.RohsStatusCode,
-                ReachStatus = "Not stated"
+                ReachStatus = ReachFromSvhc(product)
             },
             MouserCountryOfOrigin = product.CountryOfOrigin
         };
+    }
+
+    // element14 returns no REACH flag, only an SVHC attribute such as "No SVHC (27-Jun-2018)".
+    // "No SVHC" is treated as REACH unaffected; anything else stays "Not stated".
+    private static string ReachFromSvhc(Element14Product product)
+    {
+        var svhc = product.Attributes?
+            .FirstOrDefault(attribute => string.Equals(attribute.AttributeLabel?.Trim(), "SVHC", StringComparison.OrdinalIgnoreCase))
+            ?.AttributeValue;
+        return svhc != null && svhc.TrimStart().StartsWith("No SVHC", StringComparison.OrdinalIgnoreCase)
+            ? "REACH Unaffected"
+            : "Not stated";
     }
 }
 
@@ -204,6 +240,18 @@ public sealed class Element14Product
 
     [JsonPropertyName("rohsStatusCode")]
     public string? RohsStatusCode { get; set; }
+
+    [JsonPropertyName("attributes")]
+    public List<Element14Attribute>? Attributes { get; set; }
+}
+
+public sealed class Element14Attribute
+{
+    [JsonPropertyName("attributeLabel")]
+    public string? AttributeLabel { get; set; }
+
+    [JsonPropertyName("attributeValue")]
+    public string? AttributeValue { get; set; }
 }
 
 public sealed class Element14Price

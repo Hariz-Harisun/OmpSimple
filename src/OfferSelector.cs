@@ -120,12 +120,24 @@ public static class OfferSelector
         if (best.CancellationWeeks == 2 && best.RescheduleWeeks == 8 && best.CxlResDbPb == "PB")
             remarks.Add("Terms: default");
 
-        if (string.Equals(supplier, "Mouser", StringComparison.OrdinalIgnoreCase) &&
-            product.ExactKeywordMatch)
+        var isMouserSupplier = string.Equals(supplier, "Mouser", StringComparison.OrdinalIgnoreCase);
+        if (isMouserSupplier && product.ExactKeywordMatch)
         {
             var alternateTolerance = GetAlternateTolerance(product.ProductDescription, originalMpn);
             if (alternateTolerance != null)
                 remarks.Add($"Alternate: {alternateTolerance}% tolerance");
+        }
+
+        // A keyword specification accepts a capacitor that misses one requirement. Say which one.
+        // Mouser already reports a tolerance difference above, so it is left out there.
+        if (product.ExactKeywordMatch)
+        {
+            var deviations = Element14Query.SpecDeviations(
+                $"{product.ManufacturerProductNumber} {product.ProductDescription}",
+                originalMpn,
+                includeTolerance: !isMouserSupplier);
+            if (deviations.Count > 0)
+                remarks.Add($"Spec deviation: {string.Join(", ", deviations)}");
         }
 
         return (best, string.Join("; ", remarks));
@@ -378,6 +390,16 @@ public static class MpnCleaner
             return ("", "");
 
         var s = raw.Trim();
+
+        // A keyword specification is a single value. Excel wraps long cells, so a line break inside
+        // "SMT;SMD0603;0R;1%;100mW;TC100\n;--" is not a second part number.
+        if (s.StartsWith("SMT;", StringComparison.OrdinalIgnoreCase))
+        {
+            var specification = Regex.Replace(s, @"\s*[\r\n]+\s*", " ");
+            specification = Regex.Replace(specification, @"\s*;\s*", ";");
+            return (Regex.Replace(specification, @"\s+", " ").Trim(), "");
+        }
+
         s = Regex.Replace(s, @"\[.*?\]", ""); // remove brackets
 
         // Split on / or any newline sequence (\r\n, \r, \n) BEFORE normalizing whitespace
